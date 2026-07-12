@@ -1,5 +1,5 @@
 /**
- * v1.0.16 — try all 4 netlist formats
+ * v1.0.17 — JLCEDA NET: format parser (the real format)
  */
 function popup(msg: string) {
     console.log('[NL] ' + msg);
@@ -15,7 +15,12 @@ export async function analyzeSelection(): Promise<void> {
         console.log('[NL] start');
         var ids: string[] = [];
         try { ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
-        console.log('[NL] ids=' + (ids ? ids.length : 0) + ' (FULL EXPORT)');
+        console.log('[NL] ids=' + (ids ? ids.length : 0));
+
+        if (!ids || !ids.length) {
+            popup('请先在原理图中框选需要分析的元件');
+            return;
+        }
 
         console.log('[NL] getNetlist...');
         var nl: any = '';
@@ -24,77 +29,57 @@ export async function analyzeSelection(): Promise<void> {
             new Promise(function(_, reject) { setTimeout(function() { reject(new Error('timeout')); }, 15000); })
         ]); } catch (e) { console.log('[NL] timeout'); }
 
-        var raw = ''; try { raw = JSON.stringify(nl); } catch (_) {}
-        console.log('[NL] JSON=' + raw.substring(0, 300));
-
         var nets: Record<string, string[]> = {};
         var comps = new Set<string>();
-        var matched = 0;
+        var matched = false;
 
-        // A: JSON string -> .enet format
-        if (!matched && typeof nl === 'string') {
-            try { var j = JSON.parse(nl);
-                if (j && typeof j === 'object') {
-                    Object.keys(j).forEach(function(d) {
-                        var c = j[d]; if (!c || typeof c !== 'object') return;
-                        comps.add((c.props && c.props.Designator) || d);
-                        Object.keys(c.pins || {}).forEach(function(p) {
-                            var v = c.pins[p]; if (typeof v !== 'string' || !v) return;
-                            if (!nets[v]) nets[v] = [];
-                            nets[v].push(((c.props && c.props.Designator) || d) + '-' + p);
-                        });
-                    });
-                    matched = 1; console.log('[NL] fmt=A: enet-JSON');
-                }
-            } catch (_) {}
-        }
+        if (typeof nl === 'string' && nl.length > 0) {
+            var lines = nl.split('\n');
 
-        // B: text -> (net ref-pin ...)
-        if (!matched && typeof nl === 'string') {
-            var found = false;
-            nl.split('\n').forEach(function(l) {
-                var t = l.trim();
-                if (t.startsWith('(') && t.endsWith(')')) {
-                    var a = t.slice(1, -1).split(/\s+/).filter(Boolean);
-                    if (a.length >= 2) {
-                        if (!nets[a[0]]) nets[a[0]] = [];
-                        for (var i = 1; i < a.length; i++) {
-                            var r = a[i], d = r.indexOf('-');
-                            nets[a[0]].push(d > 0 ? r : r);
-                            comps.add(d > 0 ? r.substring(0, d) : r);
+            // Format: JLCEDA_PRO — "NET: netname" followed by "  Des-Pin"
+            for (var li = 0; li < lines.length; li++) {
+                var t = lines[li].trim();
+                if (t.startsWith('NET:')) {
+                    var netName = t.substring(4).trim();
+                    if (!nets[netName]) nets[netName] = [];
+                    // Collect all ref-pin on subsequent lines until next NET: or empty
+                    for (var nj = li + 1; nj < lines.length; nj++) {
+                        var sub = lines[nj].trim();
+                        if (sub.startsWith('NET:') || sub === '') break;
+                        var dash = sub.indexOf('-');
+                        if (dash > 0) {
+                            var des = sub.substring(0, dash);
+                            nets[netName].push(sub);
+                            comps.add(des);
                         }
-                        found = true;
                     }
-                }
-            });
-            if (found) { matched = 2; console.log('[NL] fmt=B: text'); }
-        }
-
-        // C: object with props/pins -> .enet object
-        if (!matched && nl && typeof nl === 'object' && !Array.isArray(nl)) {
-            var keys = Object.keys(nl);
-            if (keys.length) {
-                var s = nl[keys[0]];
-                if (s && typeof s === 'object' && (s.props || s.pins)) {
-                    keys.forEach(function(d) {
-                        var c = nl[d]; if (!c || typeof c !== 'object') return;
-                        comps.add((c.props && c.props.Designator) || d);
-                        Object.keys(c.pins || {}).forEach(function(p) {
-                            var v = c.pins[p]; if (typeof v !== 'string' || !v) return;
-                            if (!nets[v]) nets[v] = [];
-                            nets[v].push(((c.props && c.props.Designator) || d) + '-' + p);
-                        });
-                    });
-                    matched = 3; console.log('[NL] fmt=C: enet-obj');
-                } else if (typeof s === 'string') {
-                    // D: hierarchical index {des: id}
-                    keys.forEach(function(d) { comps.add(d); });
-                    matched = 4; console.log('[NL] fmt=D: hier-index (no nets)');
+                    matched = true;
+                } else if (t === '(' || t.startsWith('(')) {
+                    // Format: PROTEL2 — "(netname" ... "Des-Pin" ... ")"
+                    var nn = t === '(' ? lines[li] : t.substring(1).trim();
+                    // Actually PROTEL2 format: first line after ( is netname
+                    if (t === '(') {
+                        var nextLine = li + 1 < lines.length ? lines[li + 1].trim() : '';
+                        nn = nextLine;
+                    }
+                    if (!nets[nn]) nets[nn] = [];
+                    for (var pk = li + 1; pk < lines.length; pk++) {
+                        var s = lines[pk].trim();
+                        if (s === ')' || s.startsWith('(')) break;
+                        var d = s.indexOf('-');
+                        if (d > 0) {
+                            nets[nn].push(s);
+                            comps.add(s.substring(0, d));
+                        }
+                    }
+                    matched = true;
+                } else if (t.startsWith('{') || t.startsWith('PROTEL') || t.startsWith('*')) {
+                    continue; // header lines, skip
                 }
             }
-        }
 
-        if (!matched) console.log('[NL] fmt=UNKNOWN');
+            console.log('[NL] parsed ' + comps.size + 'c ' + Object.keys(nets).length + 'n from text');
+        }
 
         var msg = ids.length + '选中 ' + comps.size + '元件 ' + Object.keys(nets).length + '网络';
         var text = msg + '\n\n= 元件 =\n';

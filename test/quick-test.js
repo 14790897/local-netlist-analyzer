@@ -3,14 +3,14 @@ var { chromium } = require('C:/Users/13963/WorkBuddy/2026-07-12-00-12-10/extensi
 (async()=>{
 var b=await chromium.connectOverCDP('http://localhost:9273');
 var p=b.contexts()[0].pages()[0];
-
 var logs=[];
 p.on('console',function(m){var t=m.text();if(t.startsWith('[NL]')){logs.push(t);console.log(t)}});
 
-await p.reload({waitUntil:'domcontentloaded',timeout:30000});
-await new Promise(r=>setTimeout(r,15000));
+// Fresh start
+await p.goto('https://pro.lceda.cn/editor?cll=debug',{waitUntil:'domcontentloaded',timeout:30000});
+await new Promise(r=>setTimeout(r,10000));
 
-// Menu click
+// Menu click on home page
 await p.evaluate(function(){
     var btns=document.querySelectorAll('[class*=menu-btn-top-text]');
     for(var i=0;i<btns.length;i++){if(btns[i].textContent.trim()==='\u9ad8\u7ea7'){btns[i].click();return}}
