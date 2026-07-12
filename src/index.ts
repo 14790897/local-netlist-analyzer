@@ -29,6 +29,10 @@ export async function analyzeSelection(): Promise<void> {
         var nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any);
 
         // 3. 解析
+        console.log('[NL] raw type=' + typeof nl);
+        if (typeof nl === 'string') console.log('[NL] raw first 200: ' + nl.substring(0, 200));
+        else if (nl) console.log('[NL] raw keys: ' + Object.keys(nl).slice(0, 10).join(','));
+        
         var nets: Record<string, string[]> = {};
         var comps = new Set<string>();
 
