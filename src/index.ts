@@ -22,12 +22,13 @@ export async function analyzeSelection(): Promise<void> {
             return;
         }
 
-        console.log('[NL] getNetlist...');
+        console.log('[NL] getNetlist JLCEDA...');
         var nl: any = '';
-        try { nl = await Promise.race([
-            eda.sch_Netlist.getNetlist('JLCEDA' as any),
-            new Promise(function(_, reject) { setTimeout(function() { reject(new Error('timeout')); }, 15000); })
-        ]); } catch (e) { console.log('[NL] timeout'); }
+        try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) { console.log('[NL] err: ' + e); }
+        if (!nl || (typeof nl === 'string' && !nl.trim())) {
+            console.log('[NL] JLCEDA empty, trying EasyEDA...');
+            try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) { console.log('[NL] err2: ' + e); }
+        }
 
         var nets: Record<string, string[]> = {};
         var comps = new Set<string>();
