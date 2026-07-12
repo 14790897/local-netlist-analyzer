@@ -1,8 +1,8 @@
 /**
- * v1.0.13 — Toast + Warning + Info triple alert, file save backup
+ * v1.0.13 — console.log every step + triple popup + file save
  */
 function popup(msg: string) {
-    // Desktop EDA 可能不支持 showInformationMessage，三道保险
+    console.log('[NL] DIALOG:', msg);
     try { (eda.sys_ToastMessage as any).showToastMessage(msg); } catch (_) {}
     try { eda.sys_Dialog.showWarningMessage(msg); } catch (_) {}
     setTimeout(function() { try { eda.sys_Dialog.showInformationMessage(msg); } catch (_) {} }, 800);
@@ -12,9 +12,11 @@ export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
     try {
+        console.log('[NL] start');
         // 1. 选中
         var ids: string[] = [];
         try { ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
+        console.log('[NL] ids=' + (ids ? ids.length : 0));
 
         if (!ids || !ids.length) {
             popup('请先在原理图中框选需要分析的元件');
@@ -22,6 +24,7 @@ export async function analyzeSelection(): Promise<void> {
         }
 
         // 2. 网表
+        console.log('[NL] getNetlist...');
         var nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any);
 
         // 3. 解析
@@ -84,7 +87,9 @@ export async function analyzeSelection(): Promise<void> {
             });
         } catch (_) {}
 
-        // 5. 弹窗（Toast + Warning + 延迟 Info）
+        // 5. 通知
+        console.log('[NL] result: ' + msg);
+        console.log('[NL] === NETLIST ===\n' + text);
         popup(msg);
 
     } catch (e) {
