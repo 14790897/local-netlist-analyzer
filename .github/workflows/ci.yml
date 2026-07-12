@@ -41,6 +41,11 @@ jobs:
         with:
           node-version: '20'
       - run: npm install playwright-core
+      - name: Restore EDA auth
+        env:
+          AUTH: ${{ secrets.EDA_AUTH_STATE }}
+        run: |
+          echo "$env:AUTH" > test/auth.json
       - name: E2E test
         run: node test/e2e-playwright.js
       - uses: actions/upload-artifact@v4
