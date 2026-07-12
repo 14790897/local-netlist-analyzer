@@ -55,6 +55,15 @@ npm run build
 # 输出: build/dist/local-netlist-analyzer_vX.X.X.eext
 ```
 
+## 参考文档
+
+- [API 参考总览](./docs/API-REFERENCE.md)
+- [SCH_SelectControl](./docs/api/SCH-SelectControl.md) — 选择控制
+- [SCH_Netlist](./docs/api/SCH-Netlist.md) — 网表获取
+- [ISCH_Primitive / ISCH_PrimitiveComponent](./docs/api/ISCH-Primitive.md) — 图元类型定义
+- [官方 API 文档](https://prodocs.lceda.cn/cn/api/reference/)
+- [SDK 类型定义](./node_modules/@jlceda/pro-api-types/index.d.ts)
+
 ## License
 
 Apache-2.0
