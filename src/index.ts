@@ -80,11 +80,13 @@ export async function analyzeSelection(): Promise<void> {
 
         var msg = ids.length + '选中 ' + comps.size + '元件 ' + Object.keys(nets).length + '网络';
 
-        // 4. 文件保存（主输出）
+        // 4. 文件保存（主输出）— 不用 Array.from，桌面版可能没有
         var text = msg + '\n\n= 元件 =\n';
-        Array.from(comps).sort().forEach(function(d) { text += d + '\n'; });
+        var compArr: string[] = []; comps.forEach(function(d) { compArr.push(d); });
+        compArr.sort().forEach(function(d) { text += d + '\n'; });
         text += '\n= 网络 =\n';
-        Object.keys(nets).sort().forEach(function(n) {
+        var netArr = Object.keys(nets); netArr.sort();
+        netArr.forEach(function(n) {
             text += n + ': ' + (nets[n] || []).join(' ') + '\n';
         });
         try {
