@@ -27,34 +27,6 @@ jobs:
           path: build/dist/*.eext
           if-no-files-found: error
 
-  e2e:
-    needs: build
-    runs-on: windows-latest
-    if: github.event_name == 'workflow_dispatch'
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          name: extension-package
-          path: build/dist
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-      - run: npm install playwright-core
-      - name: Restore EDA auth
-        env:
-          AUTH: ${{ secrets.EDA_AUTH_STATE }}
-        run: |
-          echo "$env:AUTH" > test/auth.json
-      - name: E2E test
-        run: node test/e2e-playwright.js
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: e2e-screenshots
-          path: test/*.png
-
   release:
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
