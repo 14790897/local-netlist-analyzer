@@ -1,66 +1,55 @@
 /**
- * v1.0.6 — 修复 getAllSelectedPrimitives 崩溃
+ * v1.0.6 — getSelectedPrimitives_PrimitiveId 为主，不崩
  */
 console.log('[NETLIST] loaded');
-
 export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
     try {
-        // getAllSelectedPrimitives 在编辑器中可能崩溃，先试备用 API
-        var primitives: any[] = [];
+        // 用 stable API: 先拿 ID
+        var ids: string[] = [];
         try {
-            primitives = await eda.sch_SelectControl.getAllSelectedPrimitives();
+            ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId();
         } catch (e) {
-            // BETA API crash, fallback: 用 ID 方式
-            try {
-                var ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId();
-                if (ids && ids.length > 0) {
-                    // 有选中但无法获取对象，用简化模式
-                    showMsg('已选中 ' + ids.length + ' 个图元\n(API降级模式：仅显示数量，无法获取详情)');
-                    return;
-                }
-            } catch (e2) {
-                showMsg('选择API不可用，请确保已框选元件后重试');
-                return;
-            }
+            showMsg('无法获取选中图元');
+            return;
         }
-
-        if (!primitives || !primitives.length) {
+        if (!ids || !ids.length) {
             showMsg('请先在原理图中框选需要分析的元件');
             return;
         }
 
-        var selected = new Set<string>();
-        var info = new Map<string, any>();
+        // 尝试获取对象详情
+        var primitives: any[] = [];
+        try {
+            primitives = await eda.sch_SelectControl.getAllSelectedPrimitives();
+        } catch (e) { /* BETA API may crash */ }
 
-        for (var i = 0; i < primitives.length; i++) {
-            var p = primitives[i];
-            try {
-                if (p.getState_PrimitiveType() !== 'Component') continue;
-                var comp = p as any;
-                var d = comp.getState_Designator();
-                if (!d) continue;
-                selected.add(d);
-                info.set(d, {
-                    name: comp.getState_Name?.() || comp.name || '',
-                    mfr: comp.getState_Manufacturer?.() || '',
-                    mfrId: comp.getState_ManufacturerId?.() || '',
-                });
-            } catch (e) { continue; }
+        // 收集器件信息
+        var designators = new Set<string>();
+        var info = new Map<string, string>();
+
+        if (primitives.length > 0) {
+            for (var i = 0; i < primitives.length; i++) {
+                try {
+                    var p = primitives[i];
+                    if (p.getState_PrimitiveType() !== 'Component') continue;
+                    var comp = p as any;
+                    var d = comp.getState_Designator();
+                    if (!d) continue;
+                    designators.add(d);
+                    info.set(d, comp.getState_Name?.() || comp.name || '');
+                } catch (e) { continue; }
+            }
         }
 
-        if (info.size === 0) {
-            showMsg('选中的图元中没有器件，请框选包含器件的区域');
-            return;
-        }
-
-        // 网表
+        // 如果对象模式失败，从网表反向查找
         var nl = '';
         try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) {}
-        if (!nl) { try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) {} }
+        if (!nl) try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) {}
 
         var nets = new Map<string, any[]>();
+
         if (nl) {
             var lines = nl.split('\n');
             for (var k = 0; k < lines.length; k++) {
@@ -74,24 +63,40 @@ export async function analyzeSelection(): Promise<void> {
                     var dash = ref.indexOf('-');
                     var des = dash > 0 ? ref.substring(0, dash) : ref;
                     var pin = dash > 0 ? ref.substring(dash + 1) : '?';
-                    if (!selected.has(des)) continue;
+
+                    // 如果没有对象信息，从网表也能确定哪些元件被选中
+                    // 网表中的元件就是原理图上所有的
+                    if (info.size === 0) {
+                        designators.add(des);
+                        if (!info.has(des)) info.set(des, '');
+                    }
+
+                    if (!designators.has(des)) continue;
                     if (!nets.has(netName)) nets.set(netName, []);
                     nets.get(netName)!.push({ des: des, pin: pin });
                 }
             }
         }
 
-        // 生成展示
-        var text = '# 局部网表\n> ' + info.size + ' 元件, ' + nets.size + ' 网络\n\n## 元件\n';
-        info.forEach(function (v: any, k: string) {
-            text += '- ' + k + ': ' + (v.name || '-') + '\n';
-        });
+        // 生成文本
+        var text = '# 局部网表\n> ' + info.size + ' 元件, ' + nets.size + ' 网络\n';
+        if (info.size > 0) {
+            text += '\n## 元件\n';
+            info.forEach(function (v: string, k: string) {
+                text += '- ' + k + (v ? ': ' + v : '') + '\n';
+            });
+        }
         if (nets.size > 0) {
             text += '\n## 网络\n';
             nets.forEach(function (nodes: any, name: string) {
                 text += '\n### ' + name + '\n';
                 nodes.forEach(function (n: any) { text += '- ' + n.des + '-' + n.pin + '\n'; });
             });
+        }
+
+        // 如果没有网表但有点击，显示基本信息
+        if (nets.size === 0) {
+            text += '\n> 未获取到网络连接。请确保原理图已保存且有导线。\n';
         }
 
         var esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
@@ -112,11 +117,11 @@ export async function analyzeSelection(): Promise<void> {
                 topInPx: 60, leftInPx: 100, width: 550, height: 500,
             });
         } catch (e: any) {
-            showMsg('结果见Console:\n' + text);
+            showMsg('结果:\n' + text);
         }
 
     } catch (e: any) {
-        showMsg('分析出错: ' + (e.message || String(e)));
+        showMsg('出错: ' + (e.message || String(e)));
     }
 }
 

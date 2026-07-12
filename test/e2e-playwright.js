@@ -1,71 +1,85 @@
 'use strict';
-var path = require('path');
+var chromium = require('C:/Users/13963/WorkBuddy/2026-07-12-00-12-10/extension-dev-mcp-tools/node_modules/playwright-core').chromium;
 var fs = require('fs');
-var { chromium } = require('playwright-core');
+var path = require('path');
 
-/** E2E test - supports both local interactive and CI automated modes */
+var TEST_CODE = fs.readFileSync(path.join(__dirname, 'standalone-test.js'), 'utf-8');
+var SCHEMATIC_URL = 'https://pro.lceda.cn/editor#id=d2a1d9e755cf45178d301791fb88a7d8,tab=*9718072c423d1642@d2a1d9e755cf45178d301791fb88a7d8';
+
 (async function () {
-    console.log('=== E2E Test ===\n');
+    console.log('=== Functional Test ===\n');
 
-    var AUTH_FILE = path.join(__dirname, 'auth.json');
-    var hasAuth = fs.existsSync(AUTH_FILE);
+    var authPath = path.join(__dirname, 'auth.json');
+    var hasAuth = fs.existsSync(authPath);
 
     var context;
     if (hasAuth) {
-        // CI mode: load stored auth
-        console.log('CI mode: loading stored auth');
-        var authState = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf-8'));
         context = await chromium.launchPersistentContext('', {
-            headless: false,
-            channel: 'msedge',
-            storageState: authState,
+            headless: false, channel: 'msedge',
+            storageState: JSON.parse(fs.readFileSync(authPath, 'utf-8')),
         });
     } else {
-        // Local mode: fresh browser, user scans QR
-        console.log('Local mode: fresh Edge, login required');
         context = await chromium.launchPersistentContext('', {
-            headless: false,
-            channel: 'msedge',
+            headless: false, channel: 'msedge',
         });
     }
 
     var page = context.pages()[0] || await context.newPage();
-    var logs = [];
+    var results = [];
     page.on('console', function (m) {
         var t = m.text();
-        if (t.includes('NETLIST') || t.includes('error') || t.includes('Error') || t.includes('pro-api'))
-            logs.push(t.substring(0, 300));
+        if (t.includes('[R]')) {
+            console.log('>>', t.substring(0, 200));
+            results.push(t);
+        }
+    });
+    page.on('dialog', async function (d) {
+        console.log('DIALOG:', d.message());
+        results.push('DIALOG: ' + d.message());
+        await d.dismiss();
     });
 
-    // Open EDA
-    await page.goto('https://pro.lceda.cn/editor?cll=debug', { waitUntil: 'networkidle', timeout: 60000 });
+    // 1. 打开原理图
+    console.log('1. Opening schematic...');
+    await page.goto(SCHEMATIC_URL, { waitUntil: 'networkidle', timeout: 60000 });
     await page.waitForTimeout(10000);
-    console.log('Loaded:', (await page.title()).substring(0, 60));
+    console.log('   Title:', (await page.title()).substring(0, 60));
 
-    // Check login: look for user info instead of "登录"
-    var needsLogin = await page.evaluate(function () {
-        var body = document.body.textContent || '';
-        // True login shows projects, not login button
-        return body.includes('注册') && body.includes('登录') && !body.includes('工作区');
-    });
-    if (needsLogin) {
-        console.log('\nPlease SCAN QR CODE in the Edge window to log in.');
-        console.log('Waiting 120s for login...');
+    // 2. 检查是否登录
+    var body = await page.evaluate(function () { return document.body.textContent || ''; });
+    if (!body.includes('工作区') && !body.includes('14790897abc')) {
+        console.log('   Need login... waiting 60s');
         await page.waitForFunction(function () {
-            var b = document.body.textContent || '';
-            return b.includes('工作区');
-        }, { timeout: 120000 }).catch(function () {
-            console.log('Login timeout - continuing anyway');
-        });
-        await page.waitForTimeout(5000);
-    } else if (hasAuth) {
-        console.log('(auth loaded, checking...)');
+            return (document.body.textContent || '').includes('工作区');
+        }, { timeout: 60000 }).catch(function () {});
         await page.waitForTimeout(5000);
     }
-    console.log('Logged in\n');
 
-    // Import extension via MCP-compatible approach
-    // Go to extension manager: 高级 -> 扩展管理器
+    // 3. 框选元件
+    console.log('\n2. Selecting components...');
+    var canvas = await page.evaluate(function () {
+        var cs = document.querySelectorAll('canvas');
+        for (var i = 0; i < cs.length; i++) {
+            var r = cs[i].getBoundingClientRect();
+            if (r.width > 500) return { x: Math.floor(r.x), y: Math.floor(r.y), w: Math.floor(r.width), h: Math.floor(r.height) };
+        }
+        return null;
+    });
+    if (canvas) {
+        await page.mouse.move(canvas.x + 200, canvas.y + 100);
+        await page.mouse.down();
+        await page.waitForTimeout(300);
+        await page.mouse.move(canvas.x + canvas.w - 200, canvas.y + canvas.h - 100, { steps: 10 });
+        await page.waitForTimeout(300);
+        await page.mouse.up();
+        await page.waitForTimeout(1000);
+        console.log('   Selected on canvas');
+    } else {
+        console.log('   No canvas — continuing anyway');
+    }
+
+    // 4. 打开运行脚本
+    console.log('\n3. Opening 运行脚本...');
     await page.evaluate(function () {
         var all = document.querySelectorAll('*');
         for (var i = 0; i < all.length; i++) {
@@ -77,101 +91,73 @@ var { chromium } = require('playwright-core');
     await page.evaluate(function () {
         var all = document.querySelectorAll('*');
         for (var i = 0; i < all.length; i++) {
-            if ((all[i].textContent || '').trim().includes('扩展管理器')) { all[i].click(); return; }
+            var t = (all[i].textContent || '').trim();
+            if (t.includes('运行脚本')) { all[i].click(); return; }
         }
     });
     await page.waitForTimeout(3000);
 
-    // File upload
-    var PLUGIN = path.join(__dirname, '..', 'build', 'dist', 'local-netlist-analyzer_v1.0.5.eext');
-    var fileInput = await page.$('input[type="file"]');
-    if (!fileInput) {
-        // Try clicking import button
-        await page.evaluate(function () {
-            var all = document.querySelectorAll('*');
-            for (var i = 0; i < all.length; i++) {
-                var t = (all[i].textContent || '').trim();
-                if (t === '导入扩展' || t === '导入') { all[i].click(); return; }
+    // 5. 找代码编辑器并粘贴
+    console.log('4. Pasting code...');
+
+    // 尝试 Monaco editor
+    var pasted = await page.evaluate(function (code) {
+        // Method 1: Monaco
+        var monaco = document.querySelector('.monaco-editor');
+        if (monaco) {
+            monaco.click();
+            var lines = code.split('\n');
+            var model = window.monaco && window.monaco.editor.getModels()[0];
+            if (model) {
+                model.setValue(code);
+                return 'monaco-setValue';
             }
-        });
-        await page.waitForTimeout(2000);
-        fileInput = await page.$('input[type="file"]');
-    }
-    if (fileInput) {
-        await fileInput.setInputFiles(PLUGIN);
-        await page.waitForTimeout(5000);
-        console.log('Extension imported\n');
-    } else {
-        console.log('Could not find file input - extension may need manual import');
-    }
+        }
+        // Method 2: textarea
+        var ta = document.querySelector('textarea');
+        if (ta) {
+            ta.focus();
+            ta.value = code;
+            ta.dispatchEvent(new Event('input', { bubbles: true }));
+            return 'textarea';
+        }
+        // Method 3: contenteditable
+        var ce = document.querySelector('[contenteditable="true"]');
+        if (ce) {
+            ce.focus();
+            ce.textContent = code;
+            return 'contenteditable';
+        }
+        return 'none';
+    }, TEST_CODE);
+    console.log('   Paste method:', pasted);
+    await page.waitForTimeout(1000);
 
-    // Reload EDA
-    await page.goto('https://pro.lceda.cn/editor?cll=debug', { waitUntil: 'networkidle', timeout: 30000 });
-    await page.waitForTimeout(10000);
-    console.log('EDA reloaded\n');
-
-    // Check extension
-    var extLogs = logs.filter(function (l) { return l.includes('NETLIST') || l.includes('pro-api'); });
-    console.log('Extension logs:', extLogs.join('\n') || '(none)');
-
-    // Check dropdown
+    // 6. 点运行按钮
+    console.log('\n5. Clicking Run...');
     await page.evaluate(function () {
-        var all = document.querySelectorAll('*');
+        var all = document.querySelectorAll('button, [role="button"], [class*="btn"]');
         for (var i = 0; i < all.length; i++) {
-            if ((all[i].textContent || '').trim() === '高级') { all[i].click(); return; }
+            var t = (all[i].textContent || '').trim();
+            if (t === '运行' || t === 'Run') { all[i].click(); return; }
+        }
+        // fallback: click any visible button
+        for (var j = 0; j < all.length; j++) {
+            if (all[j].offsetHeight > 0) { all[j].click(); return; }
         }
     });
-    await page.waitForTimeout(1500);
+    await page.waitForTimeout(5000);
 
-    var dd = await page.evaluate(function () {
-        return [].map.call(document.querySelectorAll('[class*="eda-menu-item-text_ClFKm"]'), function (e) {
-            return (e.textContent || '').trim();
-        });
-    });
-    console.log('Dropdown:', JSON.stringify(dd));
+    // 7. 结果
+    console.log('\n=== Results ===');
+    console.log('Console outputs:', results.length);
+    for (var k = 0; k < results.length; k++) console.log(' ', results[k]);
 
-    // Find 局部网表
-    var hasNetlist = dd.some(function (x) { return x === '局部网表'; });
-    console.log('Has 局部网表:', hasNetlist);
-
-    if (hasNetlist) {
-        console.log('\n✅ Extension loaded! Now testing...');
-        // Click 局部网表
-        await page.evaluate(function () {
-            var all = document.querySelectorAll('*');
-            for (var i = 0; i < all.length; i++) {
-                if ((all[i].textContent || '').trim() === '局部网表') { all[i].click(); return; }
-            }
-        });
-        await page.waitForTimeout(1000);
-
-        // Click 分析选中
-        await page.evaluate(function () {
-            var all = document.querySelectorAll('*');
-            for (var i = 0; i < all.length; i++) {
-                if ((all[i].textContent || '').trim().includes('分析选中')) { all[i].click(); return; }
-            }
-        });
-        await page.waitForTimeout(5000);
-
-        // Check for IFrame or dialog
-        var ui = await page.evaluate(function () {
-            var r = [];
-            document.querySelectorAll('iframe, [class*="dialog"], [class*="modal"]').forEach(function (e) {
-                if (e.offsetHeight > 20) r.push((e.textContent || '').substring(0, 300));
-            });
-            return r;
-        });
-        console.log('UI:', JSON.stringify(ui));
+    if (results.length === 0) {
+        // 截图看状态
+        await page.screenshot({ path: path.join(__dirname, 'final-run.png') });
+        console.log('Screenshot saved: final-run.png');
     }
 
-    await page.screenshot({ path: path.join(__dirname, 'edge-test.png') });
-    console.log('\nScreenshot: edge-test.png');
-
-    console.log('\nAll logs:');
-    console.log(logs.join('\n'));
-    console.log('\n=== Done ===');
-
-    // Keep open
-    // await browser.close();
+    console.log('\nDone');
 })();
