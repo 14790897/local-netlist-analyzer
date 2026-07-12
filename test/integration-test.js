@@ -72,6 +72,9 @@ async function run() {
         getItem: function (k) { return _store[k]; }
     };
 
+    // Mock parent for iframe sandbox
+    global.parent = global;
+
     // Load extension
     console.log('1. Loading extension...');
     try {

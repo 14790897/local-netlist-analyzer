@@ -1,35 +1,50 @@
 /**
- * v1.0.8 — DOM panel + console + alert 三重保底
+ * v1.0.8 — fixes: use parent.document (extension runs in iframe sandbox)
  */
 console.log('[NETLIST] v1.0.8 loaded');
+var _parent: any = typeof parent !== 'undefined' ? parent : self;
 export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
     function showResult(html: string) {
-        // 1. DOM panel (primary)
+        var doc = _parent.document;
+        var win = _parent;
+
+        // 0. Write to parent window (F12 Console accessible)
+        try { win.__netlist_output = html; } catch (_) {}
+        console.log('[NETLIST] output ready');
+
+        // 1. DOM panel on parent document
         try {
-            var old = document.getElementById('__nl_result');
+            if (!doc || !doc.body) throw new Error('no body');
+            var old = doc.getElementById('__nl_result');
             if (old) old.remove();
-            var div = document.createElement('div');
+            var div = doc.createElement('div');
             div.id = '__nl_result';
-            div.innerHTML = '<div style="position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:99999;'
+            div.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:99999;'
                 + 'background:#1e1e1e;color:#d4d4d4;border:2px solid #569cd6;border-radius:8px;'
-                + 'max-width:620px;max-height:520px;overflow:auto;padding:16px;font:12px/1.5 monospace;'
-                + 'box-shadow:0 8px 32px rgba(0,0,0,0.6)">'
+                + 'max-width:620px;max-height:520px;overflow:auto;padding:16px;'
+                + 'font:12px/1.5 Consolas,monospace;box-shadow:0 8px 32px rgba(0,0,0,0.7)';
+            div.innerHTML = ''
                 + '<div style="display:flex;justify-content:space-between;margin-bottom:10px">'
                 + '<span style="color:#569cd6;font-weight:bold;font-size:14px">局部网表</span>'
-                + '<span id="__nl_close" style="cursor:pointer;color:#aaa;font-size:18px;line-height:1">&times;</span></div>'
-                + '<pre style="white-space:pre-wrap;margin:0;color:#ccc">' + html.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>'
-                + '</div>';
-            document.body.appendChild(div);
-            var close = document.getElementById('__nl_close');
-            if (close) close.onclick = function() { div.remove(); };
+                + '<span id="__nl_close" style="cursor:pointer;color:#aaa;font-size:18px;line-height:1">&times;</span>'
+                + '</div>'
+                + '<pre style="white-space:pre-wrap;margin:0;color:#ccc">' + html.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</pre>';
+            doc.body.appendChild(div);
+            var cb = doc.getElementById('__nl_close');
+            if (cb) cb.onclick = function() { div.remove(); };
             console.log('[NETLIST] panel shown');
+            return;
         } catch (e) {
-            console.log('[NETLIST] panel failed: ' + (e && (e as any).message));
-            // 2. Alert fallback (always works)
-            try { alert('局部网表\n\n' + html.substring(0, 500)); } catch (_) {}
+            console.log('[NETLIST] panel err: ' + (e && (e as any).message));
         }
+
+        // 2. Alert
+        try { alert('局部网表\n\n' + html.substring(0, 500)); return; } catch (_) {}
+
+        // 3. Fallback: just console
+        console.log('[NETLIST] === RESULT ===\n' + html);
     }
 
     try {
