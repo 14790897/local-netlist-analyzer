@@ -1,133 +1,58 @@
 /**
- * v1.0.9 — multi-document fallback (document / parent / top) + alert last resort
+ * v1.0.10 — pure EDA APIs only, no DOM/manipulation
  */
-console.log('[NETLIST] v1.0.9 loaded');
 export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
-    function getDoc(): any {
-        // Extension always runs in iframe → parent.document is the real page
-        try { if (parent && parent.document && parent.document.body) return parent.document; } catch (_) {}
-        try { if (top && top.document && top.document.body) return top.document; } catch (_) {}
-        try { if (document && document.body) return document; } catch (_) {}
-        return null;
-    }
-
-    function showResult(html: string) {
-        var doc = getDoc();
-        var esc = html.replace(/&/g,'&amp;').replace(/</g,'&lt;');
-        console.log('[NETLIST] doc=' + (doc ? 'found' : 'null'));
-
-        if (doc) {
-            try {
-                // Overlay mask
-                var mask = doc.createElement('div');
-                mask.id = '__nl_mask';
-                mask.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:999998';
-                doc.body.appendChild(mask);
-
-                var old = doc.getElementById('__nl_result');
-                if (old) old.remove();
-                var oldM = doc.getElementById('__nl_mask');
-                if (oldM && oldM !== mask) oldM.remove();
-
-                var div = doc.createElement('div');
-                div.id = '__nl_result';
-                div.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:999999;'
-                    + 'background:#1e1e1e;color:#d4d4d4;border:3px solid #569cd6;border-radius:10px;'
-                    + 'max-width:640px;max-height:540px;overflow:auto;padding:20px;'
-                    + 'font:12px/1.6 Consolas,monospace;box-shadow:0 12px 48px rgba(0,0,0,0.8)';
-                div.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
-                    + '<span style="color:#569cd6;font-weight:bold;font-size:15px">局部网表分析</span>'
-                    + '<span id="__nl_close" style="cursor:pointer;color:#999;font-size:20px;line-height:1" title="关闭">&times;</span></div>'
-                    + '<pre style="white-space:pre-wrap;margin:0;color:#ccc;line-height:1.5">' + esc + '</pre>';
-                doc.body.appendChild(div);
-
-                var cb = doc.getElementById('__nl_close');
-                function closeAll() { div.remove(); if (mask.parentNode) mask.remove(); }
-                if (cb) cb.onclick = closeAll;
-                mask.onclick = closeAll;
-
-                console.log('[NETLIST] panel shown');
-                return;
-            } catch (e) {
-                console.log('[NETLIST] DOM err: ' + (e && (e as any).message));
-            }
-        }
-
-        // Alert fallback
-        try { alert('局部网表\n\n' + html.substring(0, 500)); return; } catch (_) {}
-        console.log('[NETLIST] ===\n' + html);
-    }
-
     try {
-        console.log('[NETLIST] start');
-
-        // 选中检测
+        // 1. 选中
         var ids: string[] = [];
-        try { ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId(); } catch (e) {}
-        if (!ids || !ids.length) try { ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId(); } catch (e) {}
-        if (!ids || !ids.length) {
-            try {
-                var raw = await (eda.sch_SelectControl as any).getSelectedPrimitives();
-                if (Array.isArray(raw)) ids = raw.map(function(p: any) { return p.primitiveId || p.id || ''; }).filter(Boolean);
-            } catch (e) {}
-        }
-        console.log('[NETLIST] ids=' + (ids ? ids.length : 0));
-        if (!ids || !ids.length) { showResult('请先在原理图中框选需要分析的元件'); return; }
+        try { ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
+        if (!ids || !ids.length) try { ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId(); } catch (_) {}
+        if (!ids || !ids.length) try {
+            var raw = await (eda.sch_SelectControl as any).getSelectedPrimitives();
+            if (Array.isArray(raw)) ids = raw.map(function(p: any) { return p.primitiveId || p.id || ''; }).filter(Boolean);
+        } catch (_) {}
 
-        // 网表
-        console.log('[NETLIST] getNetlist...');
+        if (!ids || !ids.length) { eda.sys_Dialog.showWarningMessage('请先在原理图中框选需要分析的元件'); return; }
+
+        // 2. 网表
         var nl = '';
-        try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) {}
-        if (!nl) try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) {}
-        console.log('[NETLIST] netlist=' + (nl ? nl.length : 0));
-        if (!nl) { showResult('无网表数据。请保存原理图后重试。'); return; }
+        try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (_) {}
+        if (!nl) try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (_) {}
+        if (!nl) { eda.sys_Dialog.showWarningMessage('无法获取网表，请保存原理图'); return; }
 
-        // 解析
-        var nets = new Map<string, {des: string; pin: string}[]>();
+        // 3. 解析
+        var nets: Record<string, {des: string; pin: string}[]> = {};
         var comps = new Set<string>();
-        var lines = nl.split('\n');
-        for (var k = 0; k < lines.length; k++) {
-            var t = lines[k].trim();
-            if (!t.startsWith('(') || !t.endsWith(')')) continue;
+        nl.split('\n').forEach(function(line) {
+            var t = line.trim();
+            if (!t.startsWith('(') || !t.endsWith(')')) return;
             var parts = t.slice(1, -1).split(/\s+/).filter(Boolean);
-            if (parts.length < 2) continue;
+            if (parts.length < 2) return;
             var netName = parts[0];
-            if (!nets.has(netName)) nets.set(netName, []);
+            if (!nets[netName]) nets[netName] = [];
             for (var m = 1; m < parts.length; m++) {
-                var ref = parts[m];
-                var dash = ref.indexOf('-');
-                nets.get(netName)!.push({ des: dash > 0 ? ref.substring(0, dash) : ref, pin: dash > 0 ? ref.substring(dash + 1) : '?' });
-                comps.add(dash > 0 ? ref.substring(0, dash) : ref);
+                var ref = parts[m], dash = ref.indexOf('-');
+                var des = dash > 0 ? ref.substring(0, dash) : ref;
+                var pin = dash > 0 ? ref.substring(dash + 1) : '?';
+                nets[netName].push({des: des, pin: pin});
+                comps.add(des);
             }
-        }
-        console.log('[NETLIST] parsed ' + comps.size + 'c ' + nets.size + 'n');
-
-        // 结果文本
-        var text = '选中: ' + ids.length + ' 图元  |  元件: ' + comps.size + '  |  网络: ' + nets.size + '\n\n';
-        text += '== 元件 (' + comps.size + ') ==\n';
-        Array.from(comps).sort().forEach(function(d) { text += d + '\n'; });
-        text += '\n== 网络 (' + nets.size + ') ==\n';
-        var names: string[] = [];
-        nets.forEach(function(_, k) { names.push(k); });
-        names.sort();
-        names.forEach(function(name) {
-            text += '\n[' + name + ']\n';
-            (nets.get(name) || []).forEach(function(n) { text += '  ' + n.des + '-' + n.pin + '\n'; });
         });
 
-        showResult(text);
+        var compList = Array.from(comps).sort().map(function(d) { return {des: d, name: ''}; });
+        var payload = { selectedCount: ids.length, components: comps.size, nets: Object.keys(nets).length, componentList: compList, netList: nets };
 
-        // sessionStorage + IFrame (不阻塞)
-        try { sessionStorage.setItem('__netlist_result', JSON.stringify({
-            selectedCount: ids.length, components: comps.size, nets: nets.size,
-            componentList: Array.from(comps).sort().map(function(d) { return {des: d, name: ''}; }),
-            netList: Object.fromEntries(nets)
-        })); } catch (e) {}
-        try { await (eda.sys_IFrame as any).openIFrame('/iframe/result.html', 550, 500, undefined, { title: '局部网表' }); } catch (e) {}
+        // 4. Save to sessionStorage + open IFrame
+        try { sessionStorage.setItem('__netlist_result', JSON.stringify(payload)); } catch (_) {}
+        try { await (eda.sys_IFrame as any).openIFrame('/iframe/result.html', 550, 500, undefined, { title: '局部网表' }); return; } catch (_) {}
 
-    } catch (e: any) {
-        showResult('错误: ' + (e && e.message || String(e)));
+        // 5. Fallback: Dialog
+        var text = comps.size + ' 元件, ' + Object.keys(nets).length + ' 网络';
+        eda.sys_Dialog.showInformationMessage(text);
+
+    } catch (_) {
+        eda.sys_Dialog.showWarningMessage('分析出错');
     }
 }
