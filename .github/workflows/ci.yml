@@ -20,6 +20,7 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node test/mock-test.js
+      - run: node test/integration-test.js
       - uses: actions/upload-artifact@v4
         with:
           name: extension-package

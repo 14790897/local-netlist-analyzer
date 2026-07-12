@@ -1,163 +1,250 @@
 'use strict';
-var chromium = require('C:/Users/13963/WorkBuddy/2026-07-12-00-12-10/extension-dev-mcp-tools/node_modules/playwright-core').chromium;
-var fs = require('fs');
 var path = require('path');
+var fs = require('fs');
+var { chromium } = require('playwright-core');
 
-var TEST_CODE = fs.readFileSync(path.join(__dirname, 'standalone-test.js'), 'utf-8');
-var SCHEMATIC_URL = 'https://pro.lceda.cn/editor#id=d2a1d9e755cf45178d301791fb88a7d8,tab=*9718072c423d1642@d2a1d9e755cf45178d301791fb88a7d8';
+var EEXT = path.resolve(__dirname, '..', 'build', 'dist', 'local-netlist-analyzer_v1.0.6.eext');
+var AUTH = path.resolve(__dirname, 'auth.json');
 
-(async function () {
-    console.log('=== Functional Test ===\n');
+if (!fs.existsSync(EEXT)) { console.error('EEXT missing'); process.exit(1); }
+if (!fs.existsSync(AUTH)) { console.error('AUTH missing'); process.exit(1); }
 
-    var authPath = path.join(__dirname, 'auth.json');
-    var hasAuth = fs.existsSync(authPath);
+async function main() {
+    console.log('=== EDGE E2E: v1.0.6 ===\n');
 
-    var context;
-    if (hasAuth) {
-        context = await chromium.launchPersistentContext('', {
-            headless: false, channel: 'msedge',
-            storageState: JSON.parse(fs.readFileSync(authPath, 'utf-8')),
-        });
-    } else {
-        context = await chromium.launchPersistentContext('', {
-            headless: false, channel: 'msedge',
-        });
-    }
+    // 1. Launch Edge with auth
+    console.log('1. Launching Edge...');
+    var authState = JSON.parse(fs.readFileSync(AUTH, 'utf-8'));
+    var ctx = await chromium.launchPersistentContext('', {
+        channel: 'msedge',
+        headless: false,
+        storageState: authState,
+        viewport: { width: 1440, height: 900 }
+    });
+    var page = ctx.pages()[0] || await ctx.newPage();
 
-    var page = context.pages()[0] || await context.newPage();
-    var results = [];
-    page.on('console', function (m) {
+    // Monitor
+    page.on('console', function(m) {
         var t = m.text();
-        if (t.includes('[R]')) {
-            console.log('>>', t.substring(0, 200));
-            results.push(t);
+        if (t.includes('NETLIST')) console.log('[N]', t.substring(0, 250));
+    });
+
+    try {
+        // 2. Open EDA
+        console.log('2. Opening EDA...');
+        await page.goto('https://pro.lceda.cn/editor?cll=debug',
+            { waitUntil: 'domcontentloaded', timeout: 30000 });
+        await new Promise(function(r) { setTimeout(r, 12000); });
+        console.log('   Title:', (await page.title()).substring(0, 50));
+
+        // 3. Check if logged in
+        var body = await page.evaluate(function() {
+            return (document.body.textContent || '').substring(0, 200);
+        });
+        var needsLogin = body.includes('请登录') || body.includes('立即登录');
+        if (needsLogin) {
+            console.log('   NEEDS LOGIN - scan QR in Edge!');
+            await page.waitForFunction(function() {
+                return !(document.body.textContent || '').includes('请登录');
+            }, { timeout: 120000 }).catch(function() {});
+            console.log('   Logged in');
+            await new Promise(function(r) { setTimeout(r, 5000); });
         }
-    });
-    page.on('dialog', async function (d) {
-        console.log('DIALOG:', d.message());
-        results.push('DIALOG: ' + d.message());
-        await d.dismiss();
-    });
 
-    // 1. 打开原理图
-    console.log('1. Opening schematic...');
-    await page.goto(SCHEMATIC_URL, { waitUntil: 'networkidle', timeout: 60000 });
-    await page.waitForTimeout(10000);
-    console.log('   Title:', (await page.title()).substring(0, 60));
+        // 4. Open extension manager
+        console.log('3. Extension Manager...');
+        // Click 高级
+        await page.mouse.click(340, 16);
+        await new Promise(function(r) { setTimeout(r, 2000); });
 
-    // 2. 检查是否登录
-    var body = await page.evaluate(function () { return document.body.textContent || ''; });
-    if (!body.includes('工作区') && !body.includes('14790897abc')) {
-        console.log('   Need login... waiting 60s');
-        await page.waitForFunction(function () {
-            return (document.body.textContent || '').includes('工作区');
-        }, { timeout: 60000 }).catch(function () {});
-        await page.waitForTimeout(5000);
-    }
-
-    // 3. 框选元件
-    console.log('\n2. Selecting components...');
-    var canvas = await page.evaluate(function () {
-        var cs = document.querySelectorAll('canvas');
-        for (var i = 0; i < cs.length; i++) {
-            var r = cs[i].getBoundingClientRect();
-            if (r.width > 500) return { x: Math.floor(r.x), y: Math.floor(r.y), w: Math.floor(r.width), h: Math.floor(r.height) };
-        }
-        return null;
-    });
-    if (canvas) {
-        await page.mouse.move(canvas.x + 200, canvas.y + 100);
-        await page.mouse.down();
-        await page.waitForTimeout(300);
-        await page.mouse.move(canvas.x + canvas.w - 200, canvas.y + canvas.h - 100, { steps: 10 });
-        await page.waitForTimeout(300);
-        await page.mouse.up();
-        await page.waitForTimeout(1000);
-        console.log('   Selected on canvas');
-    } else {
-        console.log('   No canvas — continuing anyway');
-    }
-
-    // 4. 打开运行脚本
-    console.log('\n3. Opening 运行脚本...');
-    await page.evaluate(function () {
-        var all = document.querySelectorAll('*');
-        for (var i = 0; i < all.length; i++) {
-            if ((all[i].textContent || '').trim() === '高级') { all[i].click(); return; }
-        }
-    });
-    await page.waitForTimeout(1000);
-
-    await page.evaluate(function () {
-        var all = document.querySelectorAll('*');
-        for (var i = 0; i < all.length; i++) {
-            var t = (all[i].textContent || '').trim();
-            if (t.includes('运行脚本')) { all[i].click(); return; }
-        }
-    });
-    await page.waitForTimeout(3000);
-
-    // 5. 找代码编辑器并粘贴
-    console.log('4. Pasting code...');
-
-    // 尝试 Monaco editor
-    var pasted = await page.evaluate(function (code) {
-        // Method 1: Monaco
-        var monaco = document.querySelector('.monaco-editor');
-        if (monaco) {
-            monaco.click();
-            var lines = code.split('\n');
-            var model = window.monaco && window.monaco.editor.getModels()[0];
-            if (model) {
-                model.setValue(code);
-                return 'monaco-setValue';
+        // Find and click 扩展管理器
+        var extMgrPos = await page.evaluate(function() {
+            var items = document.querySelectorAll('[class*=eda-menu-item]');
+            for (var i = 0; i < items.length; i++) {
+                var t = (items[i].textContent || '').trim();
+                if (t.includes('扩展管理器')) {
+                    var r = items[i].getBoundingClientRect();
+                    return { x: Math.floor(r.x + r.width / 2), y: Math.floor(r.y + r.height / 2) };
+                }
             }
+            return null;
+        });
+        if (!extMgrPos) {
+            // Fallback to known coordinates
+            extMgrPos = { x: 418, y: 98 };
         }
-        // Method 2: textarea
-        var ta = document.querySelector('textarea');
-        if (ta) {
-            ta.focus();
-            ta.value = code;
-            ta.dispatchEvent(new Event('input', { bubbles: true }));
-            return 'textarea';
-        }
-        // Method 3: contenteditable
-        var ce = document.querySelector('[contenteditable="true"]');
-        if (ce) {
-            ce.focus();
-            ce.textContent = code;
-            return 'contenteditable';
-        }
-        return 'none';
-    }, TEST_CODE);
-    console.log('   Paste method:', pasted);
-    await page.waitForTimeout(1000);
+        console.log('   Clicking 扩展管理器 at', JSON.stringify(extMgrPos));
+        await page.mouse.click(extMgrPos.x, extMgrPos.y);
+        await new Promise(function(r) { setTimeout(r, 5000); });
 
-    // 6. 点运行按钮
-    console.log('\n5. Clicking Run...');
-    await page.evaluate(function () {
-        var all = document.querySelectorAll('button, [role="button"], [class*="btn"]');
-        for (var i = 0; i < all.length; i++) {
-            var t = (all[i].textContent || '').trim();
-            if (t === '运行' || t === 'Run') { all[i].click(); return; }
-        }
-        // fallback: click any visible button
-        for (var j = 0; j < all.length; j++) {
-            if (all[j].offsetHeight > 0) { all[j].click(); return; }
-        }
-    });
-    await page.waitForTimeout(5000);
+        // 5. Look for 导入 button
+        var importBtn = await page.evaluate(function() {
+            var btns = document.querySelectorAll('button, [role=button], span');
+            for (var i = 0; i < btns.length; i++) {
+                var t = (btns[i].textContent || '').trim();
+                var r = btns[i].getBoundingClientRect();
+                if ((t === '导入' || t.includes('导入扩展')) && r.width > 0) {
+                    return { x: Math.floor(r.x + r.width / 2), y: Math.floor(r.y + r.height / 2) };
+                }
+            }
+            return null;
+        });
 
-    // 7. 结果
-    console.log('\n=== Results ===');
-    console.log('Console outputs:', results.length);
-    for (var k = 0; k < results.length; k++) console.log(' ', results[k]);
+        if (importBtn) {
+            console.log('   Import button at', JSON.stringify(importBtn));
 
-    if (results.length === 0) {
-        // 截图看状态
-        await page.screenshot({ path: path.join(__dirname, 'final-run.png') });
-        console.log('Screenshot saved: final-run.png');
+            // Set up file chooser listener BEFORE clicking
+            var filePromise = page.waitForEvent('filechooser', { timeout: 10000 });
+            await page.mouse.click(importBtn.x, importBtn.y);
+            await new Promise(function(r) { setTimeout(r, 1000); });
+
+            try {
+                var chooser = await filePromise;
+                console.log('   File chooser opened');
+                await chooser.setFiles(EEXT);
+                console.log('   File set');
+                await new Promise(function(r) { setTimeout(r, 8000); });
+                console.log('   Extension imported!');
+            } catch (e) {
+                console.log('   File chooser failed:', String(e).substring(0, 100));
+                // Try direct input method
+                var inputs = await page.$$('input[type=file]');
+                console.log('   Direct inputs found:', inputs.length);
+                if (inputs.length > 0) {
+                    await inputs[inputs.length - 1].setInputFiles(EEXT);
+                    console.log('   Direct upload done');
+                    await new Promise(function(r) { setTimeout(r, 5000); });
+                }
+            }
+        } else {
+            console.log('   Import button NOT found');
+        }
+
+        // Close extension manager
+        await page.keyboard.press('Escape');
+        await new Promise(function(r) { setTimeout(r, 3000); });
+
+        // 6. Navigate to schematic
+        console.log('4. Opening schematic...');
+
+        // 工程 tab
+        await page.evaluate(function() {
+            var all = document.querySelectorAll('[class*=tab], div, span');
+            for (var i = 0; i < all.length; i++) {
+                if ((all[i].textContent || '').trim() === '工程' && all[i].offsetWidth < 100) {
+                    all[i].click(); return;
+                }
+            }
+        });
+        await new Promise(function(r) { setTimeout(r, 3000); });
+
+        // Click project
+        await page.evaluate(function() {
+            var all = document.querySelectorAll('*');
+            for (var i = 0; i < all.length; i++) {
+                if ((all[i].textContent || '').trim().startsWith('墨鱼AI墨水屏')) {
+                    all[i].click(); return;
+                }
+            }
+        });
+        await new Promise(function(r) { setTimeout(r, 4000); });
+
+        // Double click schematic
+        await page.evaluate(function() {
+            var all = document.querySelectorAll('*');
+            for (var i = 0; i < all.length; i++) {
+                var t = (all[i].textContent || '').trim();
+                if (t === '原理图') {
+                    all[i].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+                    return;
+                }
+            }
+        });
+        console.log('   Waiting 20s for schematic render...');
+        await new Promise(function(r) { setTimeout(r, 20000); });
+        console.log('   Title:', (await page.title()).substring(0, 60));
+
+        // 7. Check canvases
+        var cvs = await page.evaluate(function() {
+            return Array.from(document.querySelectorAll('canvas')).map(function(c) {
+                var r = c.getBoundingClientRect();
+                return { w: Math.floor(r.width), h: Math.floor(r.height),
+                    x: Math.floor(r.x), y: Math.floor(r.y), parent: c.parentElement ? c.parentElement.tagName : '?' };
+            });
+        });
+        console.log('   Canvases:', JSON.stringify(cvs));
+
+        // 8. Check if 局部网表 is in menu
+        await page.mouse.click(365, 16);
+        await new Promise(function(r) { setTimeout(r, 1500); });
+        var menuItems = await page.evaluate(function() {
+            return Array.from(document.querySelectorAll('[class*=eda-menu-item]'))
+                .map(function(e) { return (e.textContent || '').trim().substring(0, 20); })
+                .filter(function(t) { return t.length > 0; });
+        });
+        console.log('   Menu:', JSON.stringify([...new Set(menuItems)]));
+        await page.keyboard.press('Escape');
+        await new Promise(function(r) { setTimeout(r, 500); });
+
+        var hasExt = [...new Set(menuItems)].some(function(i) { return i.includes('局部网表'); });
+        if (!hasExt) {
+            console.log('   ERROR: Extension not loaded in schematic view!');
+            console.log('   The EDA extension system may require page reload.');
+            // Try reload
+            await page.reload({ waitUntil: 'domcontentloaded', timeout: 30000 });
+            await new Promise(function(r) { setTimeout(r, 15000); });
+            await page.mouse.click(365, 16);
+            await new Promise(function(r) { setTimeout(r, 1500); });
+            menuItems = await page.evaluate(function() {
+                return Array.from(document.querySelectorAll('[class*=eda-menu-item]'))
+                    .map(function(e) { return (e.textContent || '').trim().substring(0, 20); })
+                    .filter(function(t) { return t.length > 0; });
+            });
+            console.log('   After reload:', JSON.stringify([...new Set(menuItems)]));
+            await page.keyboard.press('Escape');
+            await new Promise(function(r) { setTimeout(r, 500); });
+        }
+
+        // 9. Select and test
+        var big = cvs.find(function(c) { return c.w > 400; });
+        if (!big) big = cvs.find(function(c) { return c.w > 200; });
+        if (big) {
+            console.log('   Selecting on canvas', JSON.stringify(big));
+            await page.mouse.move(big.x + 50, big.y + 50);
+            await page.mouse.down();
+            await new Promise(function(r) { setTimeout(r, 200); });
+            await page.mouse.move(big.x + big.w - 50, big.y + big.h - 50, { steps: 10 });
+            await new Promise(function(r) { setTimeout(r, 200); });
+            await page.mouse.up();
+            await new Promise(function(r) { setTimeout(r, 1000); });
+
+            // Click menu
+            await page.mouse.click(365, 16);
+            await new Promise(function(r) { setTimeout(r, 1500); });
+            await page.mouse.move(408, 126);
+            await new Promise(function(r) { setTimeout(r, 1000); });
+            await page.mouse.click(562, 125);
+            await new Promise(function(r) { setTimeout(r, 8000); });
+        }
+
+        // 10. Results
+        var iframes = await page.evaluate(function() {
+            return Array.from(document.querySelectorAll('iframe')).map(function(f, i) {
+                try {
+                    var d = f.contentDocument || f.contentWindow.document;
+                    if (d && d.body) return (d.body.textContent || '').substring(0, 300);
+                } catch (e) { return '#' + i + ': blocked'; }
+            });
+        });
+        console.log('\n=== Results ===');
+        console.log('IFrames:', iframes.length ? iframes[0] : 'none');
+
+    } finally {
+        console.log('\nKeeping browser open 15s...');
+        await new Promise(function(r) { setTimeout(r, 15000); });
+        await ctx.close();
     }
+    console.log('DONE');
+}
 
-    console.log('\nDone');
-})();
+main().catch(function(e) { console.error('FATAL:', e); process.exit(1); });
