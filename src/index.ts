@@ -4,9 +4,9 @@
 export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
-    // 辅助: 创建浮层结果面板
+    // 辅助: 创建浮层结果面板 (浏览器环境)
     function showPanel(html: string) {
-        // 清除旧的
+        if (typeof document === 'undefined') return;
         var old = document.getElementById('__nl_result');
         if (old) old.remove();
 
