@@ -42,18 +42,24 @@ var { chromium } = require('playwright-core');
     await page.waitForTimeout(10000);
     console.log('Loaded:', (await page.title()).substring(0, 60));
 
-    // Check login
+    // Check login: look for user info instead of "登录"
     var needsLogin = await page.evaluate(function () {
-        return (document.body.textContent || '').includes('登录');
+        var body = document.body.textContent || '';
+        // True login shows projects, not login button
+        return body.includes('注册') && body.includes('登录') && !body.includes('工作区');
     });
     if (needsLogin) {
         console.log('\nPlease SCAN QR CODE in the Edge window to log in.');
-        console.log('Waiting 60s for login...');
+        console.log('Waiting 120s for login...');
         await page.waitForFunction(function () {
-            return !(document.body.textContent || '').includes('登录');
-        }, { timeout: 60000 }).catch(function () {
+            var b = document.body.textContent || '';
+            return b.includes('工作区');
+        }, { timeout: 120000 }).catch(function () {
             console.log('Login timeout - continuing anyway');
         });
+        await page.waitForTimeout(5000);
+    } else if (hasAuth) {
+        console.log('(auth loaded, checking...)');
         await page.waitForTimeout(5000);
     }
     console.log('Logged in\n');

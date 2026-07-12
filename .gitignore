@@ -7,3 +7,4 @@
 /.eslintcache
 debug.log
 test/.test-browser-data/
+test/auth.json
