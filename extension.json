@@ -26,13 +26,26 @@
 	"headerMenus": {
 		"home": [
 			{
-				"id": "test-menu",
-				"title": "TEST",
+				"id": "local-netlist",
+				"title": "局部网表",
 				"menuItems": [
 					{
-						"id": "About",
-						"title": "About...",
-						"registerFn": "about"
+						"id": "analyze-selection",
+						"title": "分析选中区域网表",
+						"registerFn": "analyzeSelection"
+					}
+				]
+			}
+		],
+		"sch": [
+			{
+				"id": "local-netlist",
+				"title": "局部网表",
+				"menuItems": [
+					{
+						"id": "analyze-selection",
+						"title": "分析选中区域网表",
+						"registerFn": "analyzeSelection"
 					}
 				]
 			}
