@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>局部网表分析</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:13px/1.5 system-ui,sans-serif;background:#1e1e1e;color:#d4d4d4;padding:16px}
+h2{font-size:16px;color:#e0e0e0;margin-bottom:6px}
+.meta{font-size:11px;color:#888;margin-bottom:12px}
+.section{margin-bottom:16px}
+.section h3{font-size:13px;color:#569cd6;margin-bottom:4px;border-bottom:1px solid #333;padding-bottom:2px}
+.section ul{list-style:none;padding:0}
+.section li{font:12px/1.6 Consolas,monospace;padding:1px 0;color:#d4d4d4}
+.section li .pin{color:#888}
+.btn-row{margin-bottom:12px}
+.btn{padding:6px 14px;border:1px solid #1177bb;background:#0e639c;color:#fff;border-radius:4px;cursor:pointer;font-size:12px}
+.btn:hover{background:#1177bb}
+.btn:active{background:#0a5080}
+.empty{color:#888;font-style:italic}
+</style>
+</head>
+<body>
+<h2>局部网表</h2>
+<div class="meta" id="meta"></div>
+<div class="btn-row"><button class="btn" onclick="copyText()">复制文本</button></div>
+<div id="content"></div>
+<script>
+var data = null;
+try {
+    var raw = sessionStorage.getItem('__netlist_result');
+    if (raw) data = JSON.parse(raw);
+} catch(e) {}
+
+var meta = document.getElementById('meta');
+var content = document.getElementById('content');
+
+if (!data) {
+    meta.textContent = '无数据';
+    content.innerHTML = '<p class="empty">请关闭窗口后重新执行分析</p>';
+} else {
+    meta.textContent = data.components + ' 元件, ' + data.nets + ' 网络';
+    var html = '';
+
+    if (data.componentList && data.componentList.length) {
+        html += '<div class="section"><h3>元件</h3><ul>';
+        data.componentList.forEach(function(c) {
+            html += '<li>' + esc(c.des) + (c.name ? ' <span class="pin">' + esc(c.name) + '</span>' : '') + '</li>';
+        });
+        html += '</ul></div>';
+    }
+
+    if (data.netList) {
+        var nets = data.netList;
+        html += '<div class="section"><h3>网络 (' + Object.keys(nets).length + ')</h3>';
+        Object.keys(nets).sort().forEach(function(net) {
+            html += '<h3 style="font-size:12px;color:#ce9178;margin:8px 0 4px">' + esc(net) + '</h3><ul>';
+            nets[net].forEach(function(n) {
+                html += '<li>' + esc(n.des) + '<span class="pin">-' + esc(n.pin) + '</span></li>';
+            });
+            html += '</ul>';
+        });
+        html += '</div>';
+    }
+
+    if (!html) html = '<p class="empty">无数据</p>';
+    content.innerHTML = html;
+}
+
+function esc(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+
+function copyText() {
+    if (!data) return;
+    var lines = ['局部网表: ' + data.components + ' 元件, ' + data.nets + ' 网络', ''];
+    if (data.componentList) {
+        lines.push('== 元件 ==');
+        data.componentList.forEach(function(c) { lines.push(c.des + (c.name ? ': ' + c.name : '')); });
+        lines.push('');
+    }
+    if (data.netList) {
+        lines.push('== 网络 ==');
+        Object.keys(data.netList).sort().forEach(function(net) {
+            lines.push(net);
+            data.netList[net].forEach(function(n) { lines.push('  ' + n.des + '-' + n.pin); });
+            lines.push('');
+        });
+    }
+    navigator.clipboard.writeText(lines.join('\n')).then(function() {
+        var btn = document.querySelector('.btn');
+        btn.textContent = '已复制!';
+        setTimeout(function() { btn.textContent = '复制文本'; }, 1500);
+    });
+}
+</script>
+</body>
+</html>
