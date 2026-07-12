@@ -2,10 +2,11 @@
  * v1.0.13 — console.log every step + triple popup + file save
  */
 function popup(msg: string) {
-    console.log('[NL] DIALOG:', msg);
+    console.log('[NL] ' + msg);
+    // 三道保险 — 直接调，不用 setTimeout
     try { (eda.sys_ToastMessage as any).showToastMessage(msg); } catch (_) {}
     try { eda.sys_Dialog.showWarningMessage(msg); } catch (_) {}
-    setTimeout(function() { try { eda.sys_Dialog.showInformationMessage(msg); } catch (_) {} }, 800);
+    try { eda.sys_Dialog.showInformationMessage(msg); } catch (_) {}
 }
 
 export function activate(): void {}
