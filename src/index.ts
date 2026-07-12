@@ -1,22 +1,38 @@
 /**
- * v1.0.6 — 纯 netlist 方案，不崩
- *   - 只用 getSelectedPrimitives_PrimitiveId (stable)
- *   - get netlist → 解析元件和网络
- *   - openIFrame 显示结果
+ * v1.0.7 — 修复选中检测
+ *   - getSelectedPrimitives_PrimitiveId 已弃用, 改用 getAllSelectedPrimitives_PrimitiveId
+ *   - 三重 fallback 确保不遗漏选中
  */
-console.log('[NETLIST] loaded');
+console.log('[NETLIST] v1.0.7 loaded');
 export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
     try {
-        // 1. 检查选中
+        // 1. 检查选中 — 三重 API 兜底
         var ids: string[] = [];
+
+        // 优先用新版 API (官方推荐的替代)
         try {
-            ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId();
-        } catch (e) {
-            showMsg('无法获取选中图元');
-            return;
+            ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId();
+        } catch (e) { console.log('[NETLIST] BETA API failed, trying deprecated...'); }
+
+        // Fallback 1: 弃用但可能仍有效的旧 API
+        if (!ids || !ids.length) {
+            try {
+                ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId();
+            } catch (e) {}
         }
+
+        // Fallback 2: getSelectedPrimitives (deprecated, 返回参数对象)
+        if (!ids || !ids.length) {
+            try {
+                var raw = await (eda.sch_SelectControl as any).getSelectedPrimitives();
+                if (Array.isArray(raw)) {
+                    ids = raw.map(function(p: any) { return p.primitiveId || p.id || ''; }).filter(Boolean);
+                }
+            } catch (e) {}
+        }
+
         if (!ids || !ids.length) {
             showMsg('请先在原理图中框选需要分析的元件');
             return;
