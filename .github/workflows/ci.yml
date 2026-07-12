@@ -22,6 +22,9 @@ jobs:
 
       - run: npm run build
 
+      - name: Run mock test
+        run: node test/mock-test.js
+
       - name: Upload extension artifact
         uses: actions/upload-artifact@v4
         with:
