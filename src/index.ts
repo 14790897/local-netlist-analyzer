@@ -95,6 +95,12 @@ export async function analyzeSelection(): Promise<void> {
             content: text
         }); } catch (_) {}
 
+        // Store for IFrame / browser test verification
+        try { sessionStorage.setItem('__netlist_result', JSON.stringify({
+            selectedCount: ids.length, components: comps.size, nets: Object.keys(nets).length,
+            componentList: ca, netList: nets, netlistText: text
+        })); } catch (_) {}
+
         popup(msg);
     } catch (e) {
         popup('分析出错: ' + (e && (e as any).message || String(e)));

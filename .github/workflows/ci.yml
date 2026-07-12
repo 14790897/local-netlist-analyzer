@@ -21,6 +21,11 @@ jobs:
       - run: npm run build
       - run: node test/mock-test.js
       - run: node test/integration-test.js
+      - name: Browser E2E test
+        run: |
+          npm install playwright-core
+          npx playwright install chromium
+          node test/browser-test.js
       - uses: actions/upload-artifact@v4
         with:
           name: extension-package
