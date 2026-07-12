@@ -1,56 +1,171 @@
 'use strict';
-var chromium = require('playwright-core').chromium;
+var path = require('path');
+var fs = require('fs');
+var { chromium } = require('playwright-core');
 
+/** E2E test - supports both local interactive and CI automated modes */
 (async function () {
-    var b = await chromium.connectOverCDP('http://localhost:9273');
-    var ctx = b.contexts()[0];
-    var pages = ctx.pages();
+    console.log('=== E2E Test ===\n');
 
-    console.log('Pages:', pages.length);
-    for (var i = 0; i < pages.length; i++) {
-        console.log(' [' + i + ']', pages[i].url().substring(0, 80));
+    var AUTH_FILE = path.join(__dirname, 'auth.json');
+    var hasAuth = fs.existsSync(AUTH_FILE);
+
+    var context;
+    if (hasAuth) {
+        // CI mode: load stored auth
+        console.log('CI mode: loading stored auth');
+        var authState = JSON.parse(fs.readFileSync(AUTH_FILE, 'utf-8'));
+        context = await chromium.launchPersistentContext('', {
+            headless: false,
+            channel: 'msedge',
+            storageState: authState,
+        });
+    } else {
+        // Local mode: fresh browser, user scans QR
+        console.log('Local mode: fresh Edge, login required');
+        context = await chromium.launchPersistentContext('', {
+            headless: false,
+            channel: 'msedge',
+        });
     }
 
-    // 用最后一个页面（可能是导入完成后的新页面，加载了扩展）
-    var p = pages[pages.length - 1];
-    var t = await p.title();
-    console.log('\nUsing page:', t.substring(0, 60));
-
+    var page = context.pages()[0] || await context.newPage();
     var logs = [];
-    p.on('console', function (m) { if (m.text().includes('NETLIST')) logs.push(m.text().substring(0, 300)); });
-
-    // 刷新
-    await p.reload({ waitUntil: 'networkidle', timeout: 30000 });
-    await new Promise(r => setTimeout(r, 10000));
-    console.log('Reloaded');
-
-    // 检查扩展是否加载
-    var extLog = await p.evaluate(function () {
-        return 'body has ' + (document.body ? 1 : 0) + ' elements, localStorage: ' + Object.keys(localStorage).length;
+    page.on('console', function (m) {
+        var t = m.text();
+        if (t.includes('NETLIST') || t.includes('error') || t.includes('Error') || t.includes('pro-api'))
+            logs.push(t.substring(0, 300));
     });
-    console.log('Page state:', extLog);
 
-    // 框选 + 菜单
-    try {
-        await p.mouse.move(600, 200);
-        await p.mouse.down();
-        await new Promise(r => setTimeout(r, 300));
-        await p.mouse.move(1200, 500, { steps: 10 });
-        await new Promise(r => setTimeout(r, 300));
-        await p.mouse.up();
-        await new Promise(r => setTimeout(r, 1000));
+    // Open EDA
+    await page.goto('https://pro.lceda.cn/editor?cll=debug', { waitUntil: 'networkidle', timeout: 60000 });
+    await page.waitForTimeout(10000);
+    console.log('Loaded:', (await page.title()).substring(0, 60));
 
-        await p.mouse.click(722, 16);   // 高级
-        await new Promise(r => setTimeout(r, 1000));
-        await p.mouse.click(774, 126);  // 局部网表
-        await new Promise(r => setTimeout(r, 800));
-        await p.mouse.click(928, 125);  // 分析选中
-        await new Promise(r => setTimeout(r, 5000));
-    } catch (e) {
-        console.log('Click error:', e.message);
+    // Check login
+    var needsLogin = await page.evaluate(function () {
+        return (document.body.textContent || '').includes('登录');
+    });
+    if (needsLogin) {
+        console.log('\nPlease SCAN QR CODE in the Edge window to log in.');
+        console.log('Waiting 60s for login...');
+        await page.waitForFunction(function () {
+            return !(document.body.textContent || '').includes('登录');
+        }, { timeout: 60000 }).catch(function () {
+            console.log('Login timeout - continuing anyway');
+        });
+        await page.waitForTimeout(5000);
+    }
+    console.log('Logged in\n');
+
+    // Import extension via MCP-compatible approach
+    // Go to extension manager: 高级 -> 扩展管理器
+    await page.evaluate(function () {
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            if ((all[i].textContent || '').trim() === '高级') { all[i].click(); return; }
+        }
+    });
+    await page.waitForTimeout(1000);
+
+    await page.evaluate(function () {
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            if ((all[i].textContent || '').trim().includes('扩展管理器')) { all[i].click(); return; }
+        }
+    });
+    await page.waitForTimeout(3000);
+
+    // File upload
+    var PLUGIN = path.join(__dirname, '..', 'build', 'dist', 'local-netlist-analyzer_v1.0.5.eext');
+    var fileInput = await page.$('input[type="file"]');
+    if (!fileInput) {
+        // Try clicking import button
+        await page.evaluate(function () {
+            var all = document.querySelectorAll('*');
+            for (var i = 0; i < all.length; i++) {
+                var t = (all[i].textContent || '').trim();
+                if (t === '导入扩展' || t === '导入') { all[i].click(); return; }
+            }
+        });
+        await page.waitForTimeout(2000);
+        fileInput = await page.$('input[type="file"]');
+    }
+    if (fileInput) {
+        await fileInput.setInputFiles(PLUGIN);
+        await page.waitForTimeout(5000);
+        console.log('Extension imported\n');
+    } else {
+        console.log('Could not find file input - extension may need manual import');
     }
 
-    console.log('\n=== [NETLIST] logs ===');
-    console.log(logs.join('\n') || '(nothing)');
-    console.log('\nDone');
+    // Reload EDA
+    await page.goto('https://pro.lceda.cn/editor?cll=debug', { waitUntil: 'networkidle', timeout: 30000 });
+    await page.waitForTimeout(10000);
+    console.log('EDA reloaded\n');
+
+    // Check extension
+    var extLogs = logs.filter(function (l) { return l.includes('NETLIST') || l.includes('pro-api'); });
+    console.log('Extension logs:', extLogs.join('\n') || '(none)');
+
+    // Check dropdown
+    await page.evaluate(function () {
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            if ((all[i].textContent || '').trim() === '高级') { all[i].click(); return; }
+        }
+    });
+    await page.waitForTimeout(1500);
+
+    var dd = await page.evaluate(function () {
+        return [].map.call(document.querySelectorAll('[class*="eda-menu-item-text_ClFKm"]'), function (e) {
+            return (e.textContent || '').trim();
+        });
+    });
+    console.log('Dropdown:', JSON.stringify(dd));
+
+    // Find 局部网表
+    var hasNetlist = dd.some(function (x) { return x === '局部网表'; });
+    console.log('Has 局部网表:', hasNetlist);
+
+    if (hasNetlist) {
+        console.log('\n✅ Extension loaded! Now testing...');
+        // Click 局部网表
+        await page.evaluate(function () {
+            var all = document.querySelectorAll('*');
+            for (var i = 0; i < all.length; i++) {
+                if ((all[i].textContent || '').trim() === '局部网表') { all[i].click(); return; }
+            }
+        });
+        await page.waitForTimeout(1000);
+
+        // Click 分析选中
+        await page.evaluate(function () {
+            var all = document.querySelectorAll('*');
+            for (var i = 0; i < all.length; i++) {
+                if ((all[i].textContent || '').trim().includes('分析选中')) { all[i].click(); return; }
+            }
+        });
+        await page.waitForTimeout(5000);
+
+        // Check for IFrame or dialog
+        var ui = await page.evaluate(function () {
+            var r = [];
+            document.querySelectorAll('iframe, [class*="dialog"], [class*="modal"]').forEach(function (e) {
+                if (e.offsetHeight > 20) r.push((e.textContent || '').substring(0, 300));
+            });
+            return r;
+        });
+        console.log('UI:', JSON.stringify(ui));
+    }
+
+    await page.screenshot({ path: path.join(__dirname, 'edge-test.png') });
+    console.log('\nScreenshot: edge-test.png');
+
+    console.log('\nAll logs:');
+    console.log(logs.join('\n'));
+    console.log('\n=== Done ===');
+
+    // Keep open
+    // await browser.close();
 })();

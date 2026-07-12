@@ -1,7 +1,11 @@
 /**
  * v1.0.5 — 容错版
  */
-export function activate(): void {}
+console.log('[NETLIST] script loaded');
+
+export function activate(): void {
+    console.log('[NETLIST] activate called');
+}
 
 export async function analyzeSelection(): Promise<void> {
     try {

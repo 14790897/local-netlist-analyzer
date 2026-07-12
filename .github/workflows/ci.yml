@@ -6,40 +6,48 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
           cache: npm
-
       - run: npm ci
-
       - run: npm run build
-
-      - name: Run mock test
-        run: node test/mock-test.js
-
-      - name: Upload extension artifact
-        uses: actions/upload-artifact@v4
+      - run: node test/mock-test.js
+      - uses: actions/upload-artifact@v4
         with:
           name: extension-package
           path: build/dist/*.eext
           if-no-files-found: error
 
-      - name: Extract extension info
-        id: ext
-        run: |
-          EEXT_FILE=$(ls build/dist/*.eext | head -1)
-          echo "file=${EEXT_FILE}" >> $GITHUB_OUTPUT
-          echo "filename=$(basename ${EEXT_FILE})" >> $GITHUB_OUTPUT
-          echo "Displaying eext content..."
-          unzip -l "${EEXT_FILE}"
+  e2e:
+    needs: build
+    runs-on: windows-latest
+    if: github.event_name == 'workflow_dispatch'
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: extension-package
+          path: build/dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - run: npm install playwright-core
+      - name: E2E test
+        run: node test/e2e-playwright.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: test/*.png
 
   release:
     needs: build
@@ -51,9 +59,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: extension-package
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v2
         with:
           files: '*.eext'
           generate_release_notes: true
