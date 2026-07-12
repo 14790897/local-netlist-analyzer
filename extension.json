@@ -3,10 +3,10 @@
 	"uuid": "7bdb0024e09b43129fe600321240eb6d",
 	"displayName": "局部网表分析器",
 	"description": "框选原理图区域，导出选中元件关联的局部网表，用于 AI 电路分析",
-	"version": "1.0.3",
+	"version": "1.0.4",
 	"publisher": "liuweiqing",
 	"engines": {
-		"eda": "^2.3.0"
+		"eda": "^3.0.0"
 	},
 	"license": "Apache-2.0",
 	"repository": {
@@ -26,39 +26,13 @@
 	"headerMenus": {
 		"home": [
 			{
-				"id": "local-netlist",
-				"title": "局部网表",
+				"id": "test-menu",
+				"title": "TEST",
 				"menuItems": [
 					{
-						"id": "analyze-selection",
-						"title": "分析选中区域网表",
-						"registerFn": "analyzeSelection"
-					}
-				]
-			}
-		],
-		"sch": [
-			{
-				"id": "local-netlist",
-				"title": "局部网表",
-				"menuItems": [
-					{
-						"id": "analyze-selection",
-						"title": "分析选中区域网表",
-						"registerFn": "analyzeSelection"
-					}
-				]
-			}
-		],
-		"pcb": [
-			{
-				"id": "local-netlist",
-				"title": "局部网表",
-				"menuItems": [
-					{
-						"id": "analyze-selection",
-						"title": "分析选中区域网表",
-						"registerFn": "analyzeSelection"
+						"id": "About",
+						"title": "About...",
+						"registerFn": "about"
 					}
 				]
 			}
