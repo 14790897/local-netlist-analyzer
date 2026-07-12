@@ -1,8 +1,8 @@
 /**
- * v1.0.10 — .enet JSON parsing + full logging
+ * v1.0.11 — .enet JSON parsing + full logging
  */
 var log: any = (typeof console !== 'undefined' && console.log) ? console.log.bind(console) : function(){};
-log('[NL] v1.0.10 loaded');
+log('[NL] v1.0.11 loaded');
 
 export function activate(): void {}
 
