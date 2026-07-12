@@ -1,92 +1,116 @@
 'use strict';
-var path = require('path');
-var spawn = require('child_process').spawn;
 var chromium = require('playwright-core').chromium;
 
-var CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-var DATA = path.join(__dirname, '.test-browser-data');
-var URL = 'https://pro.lceda.cn/editor?cll=debug';
-var PLUGIN = path.join(__dirname, '..', 'build', 'dist', 'local-netlist-analyzer_v1.0.4.eext');
-var PORT = 9393;
-
-function sleep(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
-
 (async function () {
-    console.log('=== Standalone Full Auto Test ===\n');
+    var b = await chromium.connectOverCDP('http://localhost:9273');
+    var p = b.contexts()[0].pages()[0];
 
-    // 不杀 Chrome — 用独立 port 和 user-data-dir
+    var logs = [];
+    p.on('console', function (m) { logs.push(m.text().substring(0, 200)); });
 
-    // 启动 Chrome
-    console.log('Starting Chrome...');
-    var chrome = spawn(CHROME, [
-        '--remote-debugging-port=' + PORT,
-        '--user-data-dir=' + DATA,
-        '--no-first-run', '--no-default-browser-check',
-        URL,
-    ], { stdio: 'ignore', detached: true });
-    chrome.unref();
-    await sleep(8000);
-    console.log('Chrome started\n');
+    await p.goto('https://pro.lceda.cn/editor?cll=debug', { waitUntil: 'networkidle', timeout: 30000 });
+    await new Promise(r => setTimeout(r, 8000));
 
-    // 连接
-    var browser, page;
-    try {
-        browser = await chromium.connectOverCDP('http://localhost:' + PORT);
-        page = browser.contexts()[0].pages()[0];
-        await sleep(3000);
-        console.log('Connected\n');
+    // 新建原理图: 文件→新建→原理图
+    await p.mouse.click(85, 16);  // 文件
+    await new Promise(r => setTimeout(r, 1000));
+    // 找并点"新建"或"原理图"
+    await p.evaluate(function () {
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            var t = (all[i].textContent || '').trim();
+            if (t === '新建' || t === '新建(N)') { all[i].click(); break; }
+        }
+    });
+    await new Promise(r => setTimeout(r, 1000));
+    
+    await p.evaluate(function () {
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            var t = (all[i].textContent || '').trim();
+            if (t === '原理图' || t === '原理图(S)') { all[i].click(); break; }
+        }
+    });
+    await new Promise(r => setTimeout(r, 5000));
+    console.log('New schematic created\n');
 
-        // 收集日志
-        var logs = [];
-        page.on('console', function (m) {
-            logs.push('[' + m.type() + '] ' + m.text().substring(0, 150));
-        });
+    // 找大 canvas
+    var bc = await p.evaluate(function () {
+        return [].map.call(document.querySelectorAll('canvas'), function(c) { var r=c.getBoundingClientRect(); return {w:Math.floor(r.width),h:Math.floor(r.height)}; });
+    });
+    console.log('Canvases:', JSON.stringify(bc));
 
-        // 等 EDA 加载完
-        await page.waitForFunction(function () {
-            return document.querySelectorAll('*').length > 100;
-        }, { timeout: 30000 }).catch(function () {});
-        await sleep(3000);
-        console.log('EDA loaded\n');
+    // 在空白原理图上放置两个元件
+    // 点左侧"常用库"
+    await p.evaluate(function () {
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            if ((all[i].textContent || '').trim() === '常用库') { all[i].click(); break; }
+        }
+    });
+    await new Promise(r => setTimeout(r, 2000));
 
-        // 点高级菜单
-        await page.evaluate(function () {
-            var all = document.querySelectorAll('*');
-            for (var i = 0; i < all.length; i++) {
-                if ((all[i].textContent || '').trim() === '高级') {
-                    all[i].click(); return;
-                }
+    // 找元件列表中的 R 电阻并放置
+    var placed = await p.evaluate(function () {
+        var all = document.querySelectorAll('*');
+        for (var i = 0; i < all.length; i++) {
+            var t = (all[i].textContent || '').trim();
+            if (t === 'R_0805' || t === 'R 0805' || (t.startsWith('R_') && t.length < 10)) {
+                all[i].dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
+                return t;
             }
-        });
-        await sleep(2000);
+        }
+        return 'no resistor found';
+    });
+    console.log('Place:', placed);
+    await new Promise(r => setTimeout(r, 2000));
 
-        // 查菜单
-        var menus = await page.evaluate(function () {
-            var found = [];
-            var all = document.querySelectorAll('*');
-            for (var i = 0; i < all.length; i++) {
-                var t = (all[i].textContent || '').replace(/\s+/g, ' ').trim();
-                if (t === '局部网表' || t === 'TEST' || t === '分析选中区域网表'
-                    || t.includes('扩展管理器') || t.includes('运行脚本') || t.includes('脚本列表')
-                    || t === 'Kimi AI 助手' || t === 'About...' || (t.includes('扩展') && t.length < 10)) {
-                    found.push(all[i].tagName + ':' + t);
-                }
-            }
-            return found;
-        });
-        console.log('高级菜单:', JSON.stringify(menus));
-
-        // extension 日志
-        var extLogs = logs.filter(function (l) {
-            return l.includes('pro-api') || l.includes('7bdb0024') || l.includes('error') || l.includes('Error');
-        });
-        console.log('\n日志:', extLogs.join('\n') || '(none)');
-        console.log('\n=== Done ===');
-
-    } catch (e) {
-        console.error('Fatal:', e.message);
-    } finally {
-        // 不关 browser，让用户能看到结果
-        console.log('Browser stays open for review');
+    // 在画布上点击放置
+    var bigC = await p.evaluate(function () {
+        var cs = document.querySelectorAll('canvas');
+        for (var i = 0; i < cs.length; i++) {
+            var r = cs[i].getBoundingClientRect();
+            if (r.width > 500) return { x: Math.floor(r.x + r.width/2), y: Math.floor(r.y + r.height/2) };
+        }
+        return null;
+    });
+    if (bigC) {
+        await p.mouse.click(bigC.x, bigC.y);
+        await new Promise(r => setTimeout(r, 500));
+        await p.mouse.click(bigC.x + 100, bigC.y + 100);
+        console.log('Components placed at:', bigC.x, bigC.y, '\n');
+        await new Promise(r => setTimeout(r, 1000));
     }
+
+    // 框选
+    if (bigC) {
+        await p.mouse.move(bigC.x - 50, bigC.y - 50);
+        await p.mouse.down();
+        await new Promise(r => setTimeout(r, 200));
+        await p.mouse.move(bigC.x + 200, bigC.y + 200, { steps: 10 });
+        await new Promise(r => setTimeout(r, 200));
+        await p.mouse.up();
+        await new Promise(r => setTimeout(r, 1000));
+        console.log('Selected\n');
+    }
+
+    // 菜单
+    await p.mouse.click(365, 16);
+    await new Promise(r => setTimeout(r, 1000));
+    await p.mouse.click(408, 125);
+    await new Promise(r => setTimeout(r, 800));
+    await p.mouse.click(590, 124);
+    await new Promise(r => setTimeout(r, 3000));
+    console.log('Menu clicked\n');
+
+    // 结果
+    var ui = await p.evaluate(function () {
+        var r = [];
+        document.querySelectorAll('iframe, [class*="dialog"], [class*="modal"], [class*="toast"]').forEach(function (e) {
+            if (e.offsetHeight > 20) r.push((e.textContent || '').substring(0, 300));
+        });
+        return r;
+    });
+    console.log('UI:', JSON.stringify(ui));
+    console.log('\nDone');
 })();

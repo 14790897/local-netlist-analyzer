@@ -21,7 +21,7 @@
 	"homepage": "",
 	"bugs": "",
 	"activationEvents": {},
-	"entry": "./dist/index",
+	"entry": "./dist/index.js",
 	"dependentExtensions": {},
 	"headerMenus": {
 		"home": [
