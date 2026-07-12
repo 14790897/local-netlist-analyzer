@@ -1,6 +1,13 @@
 /**
- * v1.0.12 — try-catch around everything, file + dialog output
+ * v1.0.13 — Toast + Warning + Info triple alert, file save backup
  */
+function popup(msg: string) {
+    // Desktop EDA 可能不支持 showInformationMessage，三道保险
+    try { (eda.sys_ToastMessage as any).showToastMessage(msg); } catch (_) {}
+    try { eda.sys_Dialog.showWarningMessage(msg); } catch (_) {}
+    setTimeout(function() { try { eda.sys_Dialog.showInformationMessage(msg); } catch (_) {} }, 800);
+}
+
 export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
@@ -10,7 +17,7 @@ export async function analyzeSelection(): Promise<void> {
         try { ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
 
         if (!ids || !ids.length) {
-            eda.sys_Dialog.showInformationMessage('请先在原理图中框选需要分析的元件');
+            popup('请先在原理图中框选需要分析的元件');
             return;
         }
 
@@ -28,9 +35,8 @@ export async function analyzeSelection(): Promise<void> {
                     var c = j[d]; if (!c) return;
                     var desig = (c.props && c.props.Designator) || d;
                     comps.add(desig);
-                    var pins = c.pins || {};
-                    Object.keys(pins).forEach(function(n) {
-                        var v = pins[n]; if (!v) return;
+                    Object.keys(c.pins || {}).forEach(function(n) {
+                        var v = c.pins[n]; if (!v) return;
                         if (!nets[v]) nets[v] = [];
                         nets[v].push(desig + '-' + n);
                     });
@@ -43,9 +49,9 @@ export async function analyzeSelection(): Promise<void> {
                     if (a.length < 2) return;
                     var nm = a[0]; if (!nets[nm]) nets[nm] = [];
                     for (var i = 1; i < a.length; i++) {
-                        var r = a[i], d = r.indexOf('-'), des = d > 0 ? r.substring(0, d) : r;
+                        var r = a[i], d = r.indexOf('-');
                         nets[nm].push(d > 0 ? r : r);
-                        comps.add(des);
+                        comps.add(d > 0 ? r.substring(0, d) : r);
                     }
                 });
             }
@@ -54,37 +60,36 @@ export async function analyzeSelection(): Promise<void> {
                 var c = nl[d]; if (!c) return;
                 var desig = (c.props && c.props.Designator) || d;
                 comps.add(desig);
-                var pins = c.pins || {};
-                Object.keys(pins).forEach(function(n) {
-                    var v = pins[n]; if (!v) return;
+                Object.keys(c.pins || {}).forEach(function(n) {
+                    var v = c.pins[n]; if (!v) return;
                     if (!nets[v]) nets[v] = [];
                     nets[v].push(desig + '-' + n);
                 });
             });
         }
 
-        // 4. 文本
-        var text = ids.length + ' 选中 | ' + comps.size + ' 元件 | ' + Object.keys(nets).length + ' 网络\n\n';
-        text += '= 元件 =\n';
+        var msg = ids.length + '选中 ' + comps.size + '元件 ' + Object.keys(nets).length + '网络';
+
+        // 4. 文件保存（主输出）
+        var text = msg + '\n\n= 元件 =\n';
         Array.from(comps).sort().forEach(function(d) { text += d + '\n'; });
         text += '\n= 网络 =\n';
         Object.keys(nets).sort().forEach(function(n) {
             text += n + ': ' + (nets[n] || []).join(' ') + '\n';
         });
-
-        // 5. 文件保存
         try {
-            var fn = '局部网表_' + new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19) + '.txt';
-            await (eda.sys_FileSystem as any).saveFile({ fileName: fn, content: text });
+            await (eda.sys_FileSystem as any).saveFile({
+                fileName: '局部网表_' + new Date().toISOString().replace(/[:.]/g, '-').substring(0, 19) + '.txt',
+                content: text
+            });
         } catch (_) {}
 
-        // 6. Dialog (用延时确保不被清理)
-        var msg = comps.size + ' 元件, ' + Object.keys(nets).length + ' 网络';
-        setTimeout(function() { eda.sys_Dialog.showInformationMessage(msg); }, 500);
+        // 5. 弹窗（Toast + Warning + 延迟 Info）
+        popup(msg);
 
     } catch (e) {
         var err = e && (e as any).message || String(e);
-        eda.sys_Dialog.showInformationMessage('分析出错: ' + err);
+        popup('分析出错: ' + err);
     }
 }
 
