@@ -48,16 +48,16 @@ async function run() {
         }
     };
 
-    // Mock document for DOM panel
+    // Mock document + parent + top (multi-fallback in v1.0.9)
     var _panels = [];
     var _closeBtn = { onclick: null };
-    global.document = {
+    var _mockDoc = {
         getElementById: function (id) {
             if (id === '__nl_close') return _closeBtn;
             return _panels.find(function (p) { return p.id === id; }) || null;
         },
         createElement: function (tag) {
-            var el = { tag: tag, id: '', innerHTML: '', style: {}, onclick: null, textContent: '', _removed: false };
+            var el = { tag: tag, id: '', innerHTML: '', style: {}, onclick: null, textContent: '', _removed: false, cssText: '' };
             el.remove = function () { el._removed = true; };
             return el;
         },
@@ -65,15 +65,15 @@ async function run() {
             appendChild: function (el) { el.id = el.id || '__nl_result'; _panels.push(el); }
         }
     };
+    global.document = _mockDoc;
+    global.parent = { document: _mockDoc };
+    global.top = { document: _mockDoc };
 
     var _store = {};
     global.sessionStorage = {
         setItem: function (k, v) { _store[k] = v; },
         getItem: function (k) { return _store[k]; }
     };
-
-    // Mock parent for iframe sandbox
-    global.parent = global;
 
     // Load extension
     console.log('1. Loading extension...');
