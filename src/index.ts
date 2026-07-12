@@ -17,12 +17,9 @@ export async function analyzeSelection(): Promise<void> {
         // 1. 选中
         var ids: string[] = [];
         try { ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
-        console.log('[NL] ids=' + (ids ? ids.length : 0));
+        console.log('[NL] ids=' + (ids ? ids.length : 0) + ' (FULL EXPORT MODE)');
 
-        if (!ids || !ids.length) {
-            popup('请先在原理图中框选需要分析的元件');
-            return;
-        }
+        // 跳过选中检测，直接导出全部网表用于调试
 
         // 2. 网表
         console.log('[NL] getNetlist...');
