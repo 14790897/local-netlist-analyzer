@@ -31,10 +31,10 @@ export async function analyzeSelection(): Promise<void> {
             ]);
         } catch (e) { console.log('[NL] netlist err: ' + (e && (e as any).message)); }
 
-        // 3. 解析
+        // 3. 解析 — 结果存到 window 供 Console 手动查看
         console.log('[NL] raw type=' + typeof nl);
-        if (typeof nl === 'string') console.log('[NL] raw first 200: ' + nl.substring(0, 200));
-        else if (nl) console.log('[NL] raw keys: ' + Object.keys(nl).slice(0, 10).join(','));
+        if (typeof nl === 'string' && nl.length < 300) console.log('[NL] raw: ' + nl);
+        (window as any).__nl_raw = nl;
         
         var nets: Record<string, string[]> = {};
         var comps = new Set<string>();
@@ -95,9 +95,10 @@ export async function analyzeSelection(): Promise<void> {
             });
         } catch (_) {}
 
-        // 5. 通知
-        console.log('[NL] result: ' + msg);
-        console.log('[NL] === NETLIST ===\n' + text);
+        // 5. 通知 + 存 window 供 Console 查看
+        (window as any).__nl_result = text;
+        (window as any).__nl_rawdata = nl;
+        console.log('[NL] check window.__nl_result in Console');
         popup(msg);
 
     } catch (e) {
