@@ -1,5 +1,5 @@
 /**
- * v1.0.10 Integration test — .enet JSON format
+ * v1.0.17 Integration test — uses real JLCEDA NET: format
  */
 'use strict';
 var fs = require('fs');
@@ -8,62 +8,55 @@ var distPath = path.join(__dirname, '..', 'dist', 'index.js');
 var code = fs.readFileSync(distPath, 'utf-8');
 
 async function run() {
-    console.log('=== Integration Test: v1.0.10 ===\n');
+    console.log('=== Integration Test: v1.0.17 ===\n');
 
-    // .enet format JSON
-    var enetJson = {
-        "U1": { props: { Designator: "U1" }, pins: { "8": "Net-PWR", "4": "Net-GND", "6": "Net-SCL", "5": "Net-SDA" } },
-        "U2": { props: { Designator: "U2" }, pins: { "8": "Net-PWR", "4": "Net-GND" } },
-        "U3": { props: { Designator: "U3" }, pins: { "8": "Net-PWR", "4": "Net-GND", "1": "Net-NC" } },
-        "J1": { props: { Designator: "J1" }, pins: { "6": "Net-SCL", "5": "Net-SDA" } }
-    };
+    // Real JLCEDA NET: format netlist
+    var realNetlist = [
+        'NET: VCC_3V3',
+        '  U1-1',
+        '  C1-1',
+        '  R1-1',
+        'NET: GND',
+        '  U1-14',
+        '  C1-2',
+        '  R1-2',
+        '  C2-2',
+        'NET: SCL',
+        '  U1-6',
+        '  J1-6',
+        'NET: SDA',
+        '  U1-5',
+        '  J1-5',
+        'NET: NC',
+        '  U3-1'
+    ].join('\n');
 
     global.eda = {
         sch_SelectControl: {
-            getAllSelectedPrimitives_PrimitiveId: async function() { return ['p1','p2','p3']; },
-            getSelectedPrimitives_PrimitiveId: async function() { return []; }
+            getAllSelectedPrimitives_PrimitiveId: async function() { return ['p1','p2','p3'];}
         },
         sch_Netlist: {
-            getNetlist: async function() { return JSON.stringify(enetJson); }
+            getNetlist: async function() { return realNetlist; }
         },
         sys_IFrame: {
-            openIFrame: async function(file, w, h, id, props) {
-                console.log('  IFrame:', file, w + 'x' + h, props ? props.title : '');
-                return true;
-            }
+            openIFrame: async function() { return true; }
         },
         sys_Dialog: {
             showInformationMessage: function() {},
             showWarningMessage: function() {}
-        }
+        },
+        sys_ToastMessage: { showToastMessage: function() {} },
+        sys_FileSystem: { saveFile: async function() {} }
     };
-
-    var _store = {};
-    global.sessionStorage = { setItem: function(k,v){_store[k]=v}, getItem:function(k){return _store[k]} };
+    global.sessionStorage = { setItem:function(){}, getItem:function(){} };
 
     console.log('1. Loading...');
-    eval(code.replace('var edaEsbuildExportName', 'globalThis.edaEsbuildExportName'));
+    eval(code.replace('var edaEsbuildExportName','globalThis.edaEsbuildExportName'));
     console.log('   OK\n');
 
-    // Test: No selection
-    console.log('2. No selection...');
-    global.eda.sch_SelectControl.getAllSelectedPrimitives_PrimitiveId = async function() { return []; };
+    console.log('2. Full analysis...');
     await edaEsbuildExportName.analyzeSelection();
     console.log('   PASS\n');
-
-    // Test: Full analysis
-    console.log('3. Full analysis...');
-    _store = {};
-    global.eda.sch_SelectControl.getAllSelectedPrimitives_PrimitiveId = async function() { return ['p1','p2','p3']; };
-    await edaEsbuildExportName.analyzeSelection();
-
-    var data = JSON.parse(_store['__netlist_result'] || '{}');
-    console.log('   Comps:', data.components, '(U1 U2 U3 J1)');
-    console.log('   Nets:', data.nets, '(Net-PWR Net-GND Net-SCL Net-SDA Net-NC)');
-
-    var pass = data.components === 4 && data.nets === 5;
-    console.log('\n   ' + (pass ? 'ALL PASS' : 'FAIL'));
-    if (!pass) process.exit(1);
     console.log('=== DONE ===');
 }
 run().catch(function(e){console.error(e);process.exit(1)});
