@@ -31,9 +31,11 @@ export async function analyzeSelection(): Promise<void> {
             ]);
         } catch (e) { console.log('[NL] netlist err: ' + (e && (e as any).message)); }
 
-        // 3. 解析 — 存到 globalThis 供 Console 查看
-        console.log('[NL] raw type=' + typeof nl);
-        try { (globalThis as any).__nl_raw = nl; } catch (_) {}
+        // 3. 解析 — dump raw to console
+        var rawStr = '';
+        try { rawStr = JSON.stringify(nl); } catch (_) {}
+        if (rawStr.length > 500) rawStr = rawStr.substring(0, 500) + '...(' + rawStr.length + ' chars)';
+        console.log('[NL] RAW=' + rawStr);
         
         var nets: Record<string, string[]> = {};
         var comps = new Set<string>();
