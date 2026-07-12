@@ -6,46 +6,58 @@ export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
     function getDoc(): any {
-        try { if (document && document.body) return document; } catch (_) {}
+        // Extension always runs in iframe → parent.document is the real page
         try { if (parent && parent.document && parent.document.body) return parent.document; } catch (_) {}
         try { if (top && top.document && top.document.body) return top.document; } catch (_) {}
+        try { if (document && document.body) return document; } catch (_) {}
         return null;
     }
 
     function showResult(html: string) {
         var doc = getDoc();
         var esc = html.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+        console.log('[NETLIST] doc=' + (doc ? 'found' : 'null'));
 
-        // 1. DOM panel
         if (doc) {
             try {
+                // Overlay mask
+                var mask = doc.createElement('div');
+                mask.id = '__nl_mask';
+                mask.style.cssText = 'position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.3);z-index:999998';
+                doc.body.appendChild(mask);
+
                 var old = doc.getElementById('__nl_result');
                 if (old) old.remove();
+                var oldM = doc.getElementById('__nl_mask');
+                if (oldM && oldM !== mask) oldM.remove();
+
                 var div = doc.createElement('div');
                 div.id = '__nl_result';
                 div.style.cssText = 'position:fixed;top:60px;left:50%;transform:translateX(-50%);z-index:999999;'
-                    + 'background:#1e1e1e;color:#d4d4d4;border:2px solid #569cd6;border-radius:8px;'
-                    + 'max-width:620px;max-height:520px;overflow:auto;padding:16px;'
-                    + 'font:12px/1.5 Consolas,monospace;box-shadow:0 8px 32px rgba(0,0,0,0.7)';
-                div.innerHTML = '<div style="display:flex;justify-content:space-between;margin-bottom:10px">'
-                    + '<span style="color:#569cd6;font-weight:bold;font-size:14px">局部网表</span>'
-                    + '<span id="__nl_close" style="cursor:pointer;color:#aaa;font-size:18px">&times;</span></div>'
-                    + '<pre style="white-space:pre-wrap;margin:0;color:#ccc">' + esc + '</pre>';
+                    + 'background:#1e1e1e;color:#d4d4d4;border:3px solid #569cd6;border-radius:10px;'
+                    + 'max-width:640px;max-height:540px;overflow:auto;padding:20px;'
+                    + 'font:12px/1.6 Consolas,monospace;box-shadow:0 12px 48px rgba(0,0,0,0.8)';
+                div.innerHTML = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">'
+                    + '<span style="color:#569cd6;font-weight:bold;font-size:15px">局部网表分析</span>'
+                    + '<span id="__nl_close" style="cursor:pointer;color:#999;font-size:20px;line-height:1" title="关闭">&times;</span></div>'
+                    + '<pre style="white-space:pre-wrap;margin:0;color:#ccc;line-height:1.5">' + esc + '</pre>';
                 doc.body.appendChild(div);
+
                 var cb = doc.getElementById('__nl_close');
-                if (cb) cb.onclick = function() { div.remove(); };
-                console.log('[NETLIST] panel shown on ' + (doc === document ? 'document' : 'parent'));
+                function closeAll() { div.remove(); if (mask.parentNode) mask.remove(); }
+                if (cb) cb.onclick = closeAll;
+                mask.onclick = closeAll;
+
+                console.log('[NETLIST] panel shown');
                 return;
             } catch (e) {
-                console.log('[NETLIST] DOM failed: ' + (e && (e as any).message));
+                console.log('[NETLIST] DOM err: ' + (e && (e as any).message));
             }
         }
 
-        // 2. Alert (universal fallback)
+        // Alert fallback
         try { alert('局部网表\n\n' + html.substring(0, 500)); return; } catch (_) {}
-
-        // 3. Console-only
-        console.log('[NETLIST] === RESULT ===\n' + html);
+        console.log('[NETLIST] ===\n' + html);
     }
 
     try {

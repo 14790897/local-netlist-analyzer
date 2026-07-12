@@ -92,7 +92,10 @@ async function run() {
     _panels = [];
     _closeBtn.onclick = null;
     await edaEsbuildExportName.analyzeSelection();
-    var panelText = (_panels[0] && _panels[0].innerHTML) || '';
+    var panelText = '';
+    for (var pi = 0; pi < _panels.length; pi++) {
+        if (_panels[pi].id === '__nl_result') { panelText = _panels[pi].innerHTML || ''; break; }
+    }
     var hasHint = panelText.includes('框选');
     console.log('   ' + (hasHint ? 'PASS' : 'FAIL') + ': panel shows hint\n');
 
@@ -105,7 +108,10 @@ async function run() {
     await edaEsbuildExportName.analyzeSelection();
 
     // Check DOM panel content
-    panelText = (_panels[0] && _panels[0].innerHTML) || '';
+    panelText = '';
+    for (var pi = 0; pi < _panels.length; pi++) {
+        if (_panels[pi].id === '__nl_result') { panelText = _panels[pi].innerHTML || ''; break; }
+    }
     var panelOk = panelText.includes('Net-PWR') && panelText.includes('U1-8');
 
     // Check sessionStorage backup
