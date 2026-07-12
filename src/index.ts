@@ -1,19 +1,33 @@
 /**
- * v1.0.5 — 容错版
+ * v1.0.6 — 修复 getAllSelectedPrimitives 崩溃
  */
-console.log('[NETLIST] script loaded');
+console.log('[NETLIST] loaded');
 
-export function activate(): void {
-    console.log('[NETLIST] activate called');
-}
+export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
     try {
-        var primitives = await eda.sch_SelectControl.getAllSelectedPrimitives();
-        console.log('[NETLIST] primitives:', primitives ? primitives.length : 0);
+        // getAllSelectedPrimitives 在编辑器中可能崩溃，先试备用 API
+        var primitives: any[] = [];
+        try {
+            primitives = await eda.sch_SelectControl.getAllSelectedPrimitives();
+        } catch (e) {
+            // BETA API crash, fallback: 用 ID 方式
+            try {
+                var ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId();
+                if (ids && ids.length > 0) {
+                    // 有选中但无法获取对象，用简化模式
+                    showMsg('已选中 ' + ids.length + ' 个图元\n(API降级模式：仅显示数量，无法获取详情)');
+                    return;
+                }
+            } catch (e2) {
+                showMsg('选择API不可用，请确保已框选元件后重试');
+                return;
+            }
+        }
 
         if (!primitives || !primitives.length) {
-            showMsg('请先在原理图中框选元件');
+            showMsg('请先在原理图中框选需要分析的元件');
             return;
         }
 
@@ -28,24 +42,24 @@ export async function analyzeSelection(): Promise<void> {
                 var d = comp.getState_Designator();
                 if (!d) continue;
                 selected.add(d);
-                console.log('[NETLIST] component:', d, comp.getState_Name?.() || '');
-                info.set(d, { name: comp.getState_Name?.() || '', mfr: comp.getState_Manufacturer?.() || '' });
+                info.set(d, {
+                    name: comp.getState_Name?.() || comp.name || '',
+                    mfr: comp.getState_Manufacturer?.() || '',
+                    mfrId: comp.getState_ManufacturerId?.() || '',
+                });
             } catch (e) { continue; }
         }
 
-        console.log('[NETLIST] components:', info.size);
-
         if (info.size === 0) {
-            showMsg('选中的图元中没有器件');
+            showMsg('选中的图元中没有器件，请框选包含器件的区域');
             return;
         }
 
         // 网表
         var nl = '';
-        try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) { console.log('[NETLIST] getNetlist fail:', e); }
-        console.log('[NETLIST] netlist len:', nl ? nl.length : 0);
+        try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) {}
+        if (!nl) { try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) {} }
 
-        // 解析
         var nets = new Map<string, any[]>();
         if (nl) {
             var lines = nl.split('\n');
@@ -67,7 +81,7 @@ export async function analyzeSelection(): Promise<void> {
             }
         }
 
-        // 生成文本
+        // 生成展示
         var text = '# 局部网表\n> ' + info.size + ' 元件, ' + nets.size + ' 网络\n\n## 元件\n';
         info.forEach(function (v: any, k: string) {
             text += '- ' + k + ': ' + (v.name || '-') + '\n';
@@ -79,11 +93,10 @@ export async function analyzeSelection(): Promise<void> {
                 nodes.forEach(function (n: any) { text += '- ' + n.des + '-' + n.pin + '\n'; });
             });
         }
-        console.log('[NETLIST] output:\n' + text);
 
-        // IFrame 展示
         var esc = text.replace(/&/g, '&amp;').replace(/</g, '&lt;');
         var js = JSON.stringify(text);
+
         try {
             (eda.sys_IFrame as any).showIFrame({
                 htmlContent: '<!DOCTYPE html><html><head><meta charset="utf-8"><style>'
@@ -98,15 +111,12 @@ export async function analyzeSelection(): Promise<void> {
                 closeOnClickOutside: false,
                 topInPx: 60, leftInPx: 100, width: 550, height: 500,
             });
-            console.log('[NETLIST] IFrame shown');
         } catch (e: any) {
-            console.log('[NETLIST] IFrame fail:', e.message || e);
-            showMsg('结果请看Console:\n' + text.split('\n').slice(0, 10).join('\n'));
+            showMsg('结果见Console:\n' + text);
         }
 
     } catch (e: any) {
-        console.log('[NETLIST] fatal:', e.message || e);
-        showMsg('出错: ' + (e.message || e));
+        showMsg('分析出错: ' + (e.message || String(e)));
     }
 }
 
