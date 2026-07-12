@@ -21,9 +21,15 @@ export async function analyzeSelection(): Promise<void> {
 
         // 跳过选中检测，直接导出全部网表用于调试
 
-        // 2. 网表
+        // 2. 网表 (15s 超时)
         console.log('[NL] getNetlist...');
-        var nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any);
+        var nl: any = '';
+        try {
+            nl = await Promise.race([
+                eda.sch_Netlist.getNetlist('JLCEDA' as any),
+                new Promise(function(_, reject) { setTimeout(function() { reject(new Error('timeout')); }, 15000); })
+            ]);
+        } catch (e) { console.log('[NL] netlist err: ' + (e && (e as any).message)); }
 
         // 3. 解析
         console.log('[NL] raw type=' + typeof nl);
