@@ -10,6 +10,7 @@ export async function analyzeSelection(): Promise<void> {
 
     if (!ids || !ids.length) {
         eda.sys_Dialog.showInformationMessage('请先在原理图中框选需要分析的元件');
+        try { alert('请先在原理图中框选需要分析的元件'); } catch (_) {}
         return;
     }
 
@@ -79,6 +80,8 @@ export async function analyzeSelection(): Promise<void> {
     });
     if (Object.keys(nets).length > 20) text += '...共' + Object.keys(nets).length + '个网络';
 
-    // 5. 显示
+    // 5. 显示 — showInformationMessage + alert 双保险
     eda.sys_Dialog.showInformationMessage(text.substring(0, 400));
+    // alert 在 Electron 桌面版也能弹
+    try { alert(text.substring(0, 500)); } catch (_) {}
 }
