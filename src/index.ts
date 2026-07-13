@@ -1,6 +1,6 @@
 /**
- * v1.0.24 — getNetlistFile (new API) + getNetlist (deprecated fallback)
- * 4 parser strategies from easyeda-ai-assistant
+ * v1.0.25 — FIX: getNetlist may return OBJECT (desktop EDA) or STRING (web)
+ * Based on jlcmcp bridge: typeof netlist === 'string' ? netlist : JSON.stringify(netlist)
  */
 export function activate(status?: 'onStartupFinished', arg?: string): void {}
 
@@ -9,14 +9,32 @@ function showDialog(msg: string) {
     try { eda.sys_Dialog.showWarningMessage(msg); } catch (_) {}
 }
 
-function parseNetlist(netlistRaw: string): { nets: Record<string, string[]>; comps: Set<string> } {
+async function getNetlistText(): Promise<string> {
+    // Try getNetlist - may return string or object
+    var formats = ['JLCEDA', 'EasyEDA', 'Protel2', undefined];
+    for (var fi = 0; fi < formats.length; fi++) {
+        try {
+            var raw = formats[fi]
+                ? await eda.sch_Netlist.getNetlist(formats[fi] as any)
+                : await eda.sch_Netlist.getNetlist();
+            if (raw) {
+                // KEY FIX: desktop EDA returns object, web returns string
+                return typeof raw === 'string' ? raw : JSON.stringify(raw);
+            }
+        } catch (_) {}
+    }
+    return '';
+}
+
+function parseNetlist(raw: string): { nets: Record<string, string[]>; comps: Set<string> } {
     var nets: Record<string, string[]> = {};
     var comps = new Set<string>();
-    if (!netlistRaw) return { nets, comps };
+    if (!raw) return { nets, comps };
 
-    // S1: JLCEDA_PRO NET: format
-    var lines = netlistRaw.split('\n');
-    if (netlistRaw.indexOf('NET:') >= 0) {
+    var lines = raw.split('\n');
+
+    // S1: NET: format
+    if (raw.indexOf('NET:') >= 0) {
         var cn = '';
         for (var i = 0; i < lines.length; i++) {
             var t = lines[i].trim();
@@ -26,7 +44,7 @@ function parseNetlist(netlistRaw: string): { nets: Record<string, string[]>; com
     }
 
     // S2: PROTEL NETLIST 2.0
-    if (comps.size === 0 && netlistRaw.indexOf('PROTEL NETLIST 2.0') >= 0) {
+    if (comps.size === 0 && raw.indexOf('PROTEL NETLIST 2.0') >= 0) {
         var inNet = false, justP = false, cnet = '';
         for (var j = 0; j < lines.length; j++) {
             var l = lines[j].trim();
@@ -36,23 +54,47 @@ function parseNetlist(netlistRaw: string): { nets: Record<string, string[]>; com
             if (inNet) {
                 if (justP) { cnet = l; justP = false; continue; }
                 if (cnet && l.indexOf('-') > 0) {
-                    var d = l.indexOf('-'), des = l.substring(0, d), pin = l.substring(d + 1).split(' ')[0];
+                    var d2 = l.indexOf('-'), des2 = l.substring(0, d2), pin2 = l.substring(d2 + 1).split(' ')[0];
                     if (!nets[cnet]) nets[cnet] = [];
-                    nets[cnet].push(des + '-' + pin);
-                    comps.add(des);
+                    nets[cnet].push(des2 + '-' + pin2);
+                    comps.add(des2);
                 }
             }
         }
     }
 
-    // S3: Generic Ref-Pin regex
+    // S3: Try JSON parse (desktop EDA returns .enet JSON object)
+    if (comps.size === 0) {
+        try {
+            var obj = JSON.parse(raw);
+            if (typeof obj === 'object' && !Array.isArray(obj)) {
+                var keys = Object.keys(obj);
+                for (var k = 0; k < keys.length; k++) {
+                    var c = obj[keys[k]];
+                    if (!c || typeof c !== 'object') continue;
+                    var desig = (c.props && c.props.Designator) || keys[k];
+                    comps.add(desig);
+                    var pins = c.pins || {};
+                    var pnKeys = Object.keys(pins);
+                    for (var pk = 0; pk < pnKeys.length; pk++) {
+                        var netName = pins[pnKeys[pk]];
+                        if (!netName) continue;
+                        if (!nets[netName]) nets[netName] = [];
+                        nets[netName].push(desig + '-' + pnKeys[pk]);
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
+    // S4: Generic Ref-Pin regex
     if (comps.size === 0) {
         var REFPIN = /([A-Za-z]+\d+)-(\d+)/g;
         var hits: {des: string; pin: string; line: number}[] = [];
-        for (var k = 0; k < lines.length; k++) {
+        for (var hk = 0; hk < lines.length; hk++) {
             REFPIN.lastIndex = 0; var m;
-            while ((m = REFPIN.exec(lines[k])) !== null) {
-                hits.push({des: m[1], pin: m[2], line: k});
+            while ((m = REFPIN.exec(lines[hk])) !== null) {
+                hits.push({des: m[1], pin: m[2], line: hk});
                 comps.add(m[1]);
             }
         }
@@ -69,44 +111,13 @@ function parseNetlist(netlistRaw: string): { nets: Record<string, string[]>; com
     return { nets, comps };
 }
 
-async function getNetlistText(): Promise<string> {
-    // P1: New API - SCH_ManufactureData.getNetlistFile (replacement for deprecated getNetlist)
-    try {
-        var file = await (eda.sch_ManufactureData as any).getNetlistFile(undefined, 'JLCEDA');
-        if (file) {
-            // File object may have content or need to be read
-            if (typeof file === 'string') return file;
-            if (file.content) return file.content;
-            if (file.data) return file.data;
-            if (file.text) return await file.text();
-            // Try toString
-            var s = String(file);
-            if (s.length > 40) return s;
-        }
-    } catch (_) {}
-
-    // P2: Deprecated getNetlist with JLCEDA
-    try { var nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); if (nl) return nl; } catch (_) {}
-
-    // P3: EasyEDA format
-    try { var nl2 = await eda.sch_Netlist.getNetlist('EasyEDA' as any); if (nl2) return nl2; } catch (_) {}
-
-    // P4: PROTEL2 format
-    try { var nl3 = await eda.sch_Netlist.getNetlist('Protel2' as any); if (nl3) return nl3; } catch (_) {}
-
-    return '';
-}
-
 export async function analyzeSelection(): Promise<void> {
     try {
         var ids: string[] = [];
         try { ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
         if (!ids || !ids.length) try { ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId(); } catch (_) {}
 
-        if (!ids || !ids.length) {
-            showDialog('请先在原理图中框选需要分析的元件');
-            return;
-        }
+        if (!ids || !ids.length) { showDialog('请先在原理图中框选需要分析的元件'); return; }
 
         var nl = await getNetlistText();
         try { (globalThis as any).__nl_raw = nl; } catch (_) {}
