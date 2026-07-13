@@ -30,6 +30,13 @@ export async function analyzeSelection(): Promise<void> {
             try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) { console.log('[NL] err2: ' + e); }
         }
 
+        // Raw dump: store to globalThis for Console inspection
+        try { (globalThis as any).__nl_raw = nl; } catch (_) {}
+        console.log('[NL] raw type=' + typeof nl + ' len=' + (typeof nl === 'string' ? nl.length : (nl ? Object.keys(nl).length : 0)));
+        if (typeof nl === 'string' && nl.length > 0) {
+            console.log('[NL] raw[0..200]=' + nl.substring(0, 200).replace(/\n/g, '\\n'));
+        }
+
         var nets: Record<string, string[]> = {};
         var comps = new Set<string>();
         var matched = false;
