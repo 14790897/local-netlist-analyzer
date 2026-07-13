@@ -1,36 +1,27 @@
 /**
- * v1.0.20 — minimal: universal parser, console.log at every step
+ * v1.0.20 — use EDA dialog as first output (not console)
  */
-console.log('[NL] v1.0.20 loaded');
+try { eda.sys_Dialog.showInformationMessage('[NL] v1.0.20 loaded'); } catch (_) {}
 
 export function activate(): void {}
 
 export async function analyzeSelection(): Promise<void> {
-    console.log('[NL] start');
     try {
-        // 1. 选中
         var ids: string[] = [];
         try { ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
         if (!ids || !ids.length) try { ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId(); } catch (_) {}
 
-        console.log('[NL] ids=' + (ids ? ids.length : 0));
         if (!ids || !ids.length) {
-            popup('请先在原理图中框选需要分析的元件');
+            eda.sys_Dialog.showInformationMessage('请先在原理图中框选需要分析的元件');
             return;
         }
 
-        // 2. 网表
-        console.log('[NL] getNetlist...');
         var nl: any = '';
-        try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) { console.log('[NL] err:' + e); }
+        try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) {}
         if (!nl || (typeof nl === 'string' && !nl.trim())) {
-            try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) { console.log('[NL] err2:' + e); }
+            try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) {}
         }
 
-        try { (globalThis as any).__nl_raw = nl; } catch (_) {}
-        console.log('[NL] raw type=' + typeof nl + ' len=' + (typeof nl === 'string' ? nl.length : 'obj'));
-
-        // 3. 通用解析
         var nets: Record<string, string[]> = {};
         var comps = new Set<string>();
         var REFPIN = /([A-Za-z]+\d+)-(\d+)/g;
@@ -65,19 +56,10 @@ export async function analyzeSelection(): Promise<void> {
                     }
                 }
             }
-            console.log('[NL] parsed ' + comps.size + 'c ' + Object.keys(nets).length + 'n');
         }
 
-        popup(ids.length + '选中 ' + comps.size + '元件 ' + Object.keys(nets).length + '网络');
-        console.log('[NL] done');
+        eda.sys_Dialog.showInformationMessage(ids.length + '选中 ' + comps.size + '元件 ' + Object.keys(nets).length + '网络');
     } catch (e) {
-        popup('分析出错');
-        console.log('[NL] fatal:' + (e && (e as any).message || String(e)));
+        eda.sys_Dialog.showInformationMessage('分析出错: ' + (e && (e as any).message || String(e)));
     }
-}
-
-function popup(msg: string) {
-    try { (eda.sys_ToastMessage as any).showToastMessage(msg); } catch (_) {}
-    try { eda.sys_Dialog.showWarningMessage(msg); } catch (_) {}
-    try { eda.sys_Dialog.showInformationMessage(msg); } catch (_) {}
 }
