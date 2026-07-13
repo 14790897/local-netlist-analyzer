@@ -3,7 +3,7 @@
 	"uuid": "7bdb0024e09b43129fe600321240eb6d",
 	"displayName": "局部网表分析器",
 	"description": "框选原理图区域，导出选中元件关联的局部网表，用于 AI 电路分析",
-	"version": "1.0.21",
+	"version": "1.0.22",
 	"publisher": "liuweiqing",
 	"engines": {
 		"eda": "^3.0.0"
