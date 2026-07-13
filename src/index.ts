@@ -1,6 +1,6 @@
 /**
- * v1.0.22 — based on jifengshandian/easyeda-ai-assistant gold standard
- * Uses ESYS_NetlistType.PROTEL2 + 4 parser strategies
+ * v1.0.24 — getNetlistFile (new API) + getNetlist (deprecated fallback)
+ * 4 parser strategies from easyeda-ai-assistant
  */
 export function activate(status?: 'onStartupFinished', arg?: string): void {}
 
@@ -9,102 +9,92 @@ function showDialog(msg: string) {
     try { eda.sys_Dialog.showWarningMessage(msg); } catch (_) {}
 }
 
-/**
- * Parse netlist with 4 strategies (from easyeda-ai-assistant):
- * 1. JLCEDA_PRO (NET: format)
- * 2. PROTEL NETLIST 2.0
- * 3. Protel2 Standard
- * 4. Generic Designator-Pin regex
- */
 function parseNetlist(netlistRaw: string): { nets: Record<string, string[]>; comps: Set<string> } {
     var nets: Record<string, string[]> = {};
     var comps = new Set<string>();
-    if (!netlistRaw) return { nets: nets, comps: comps };
+    if (!netlistRaw) return { nets, comps };
 
+    // S1: JLCEDA_PRO NET: format
     var lines = netlistRaw.split('\n');
-
-    // Strategy 1: JLCEDA_PRO — "NET: netname" + indented "Des-Pin"
     if (netlistRaw.indexOf('NET:') >= 0) {
-        var currentNet = '';
-        for (var li = 0; li < lines.length; li++) {
-            var t = lines[li].trim();
-            if (t.startsWith('NET:')) {
-                currentNet = t.substring(4).trim();
-                if (!nets[currentNet]) nets[currentNet] = [];
-            } else if (currentNet && t.indexOf('-') > 0) {
-                nets[currentNet].push(t);
-                comps.add(t.substring(0, t.indexOf('-')));
-            }
+        var cn = '';
+        for (var i = 0; i < lines.length; i++) {
+            var t = lines[i].trim();
+            if (t.startsWith('NET:')) { cn = t.substring(4).trim(); if (!nets[cn]) nets[cn] = []; }
+            else if (cn && t.indexOf('-') > 0) { nets[cn].push(t); comps.add(t.substring(0, t.indexOf('-'))); }
         }
     }
 
-    // Strategy 2: PROTEL NETLIST 2.0
+    // S2: PROTEL NETLIST 2.0
     if (comps.size === 0 && netlistRaw.indexOf('PROTEL NETLIST 2.0') >= 0) {
-        var inNet = false, currentN = '', justParen = false;
-        for (var i = 0; i < lines.length; i++) {
-            var l = lines[i].trim();
-            if (l === '(') { inNet = true; justParen = true; currentN = ''; continue; }
-            if (l === ')') { inNet = false; currentN = ''; continue; }
+        var inNet = false, justP = false, cnet = '';
+        for (var j = 0; j < lines.length; j++) {
+            var l = lines[j].trim();
+            if (l === '(') { inNet = true; justP = true; continue; }
+            if (l === ')') { inNet = false; continue; }
             if (l === '[' || l === ']') { inNet = false; continue; }
             if (inNet) {
-                if (justParen) { currentN = l; justParen = false; continue; }
-                if (currentN && l.indexOf('-') > 0) {
-                    var dash = l.indexOf('-');
-                    var d = l.substring(0, dash), p = l.substring(dash + 1);
-                    var sp = p.indexOf(' '); if (sp > 0) p = p.substring(0, sp);
-                    if (!nets[currentN]) nets[currentN] = [];
-                    nets[currentN].push(d + '-' + p);
-                    comps.add(d);
+                if (justP) { cnet = l; justP = false; continue; }
+                if (cnet && l.indexOf('-') > 0) {
+                    var d = l.indexOf('-'), des = l.substring(0, d), pin = l.substring(d + 1).split(' ')[0];
+                    if (!nets[cnet]) nets[cnet] = [];
+                    nets[cnet].push(des + '-' + pin);
+                    comps.add(des);
                 }
             }
         }
     }
 
-    // Strategy 3: Protel2 Standard (Net List section)
-    if (comps.size === 0 && (netlistRaw.indexOf('Net List') >= 0 || netlistRaw.indexOf('Component List') >= 0)) {
-        var inNL = false, cn = '';
-        for (var j = 0; j < lines.length; j++) {
-            var tl = lines[j].trim();
-            if (tl.indexOf('Net List') >= 0) { inNL = true; continue; }
-            if (tl.indexOf('Component List') >= 0) { inNL = false; continue; }
-            if (!inNL) continue;
-            var m = tl.match(/^\(\s*([^\s)]+)\s*$/);
-            if (m && !tl.endsWith(')')) { cn = m[1]; continue; }
-            if (cn) {
-                var pm = tl.match(/^([A-Z][A-Z0-9]*\d)-(\S+)\s*$/);
-                if (pm) {
-                    if (!nets[cn]) nets[cn] = [];
-                    nets[cn].push(pm[1] + '-' + pm[2]);
-                    comps.add(pm[1]);
-                    continue;
-                }
-            }
-            if (tl === ')') cn = '';
-        }
-    }
-
-    // Strategy 4: Generic regex — catch ALL Ref-Pin patterns
+    // S3: Generic Ref-Pin regex
     if (comps.size === 0) {
         var REFPIN = /([A-Za-z]+\d+)-(\d+)/g;
         var hits: {des: string; pin: string; line: number}[] = [];
         for (var k = 0; k < lines.length; k++) {
-            REFPIN.lastIndex = 0; var rm;
-            while ((rm = REFPIN.exec(lines[k])) !== null) {
-                hits.push({des: rm[1], pin: rm[2], line: k});
-                comps.add(rm[1]);
+            REFPIN.lastIndex = 0; var m;
+            while ((m = REFPIN.exec(lines[k])) !== null) {
+                hits.push({des: m[1], pin: m[2], line: k});
+                comps.add(m[1]);
             }
         }
         if (hits.length > 0) {
-            var cn2 = '_NET1', lastLine = -2;
+            var cn2 = '_NET1', ll = -2;
             for (var h = 0; h < hits.length; h++) {
-                if (hits[h].line - lastLine > 1) cn2 = '_NET' + (Object.keys(nets).length + 1);
+                if (hits[h].line - ll > 1) cn2 = '_NET' + (Object.keys(nets).length + 1);
                 if (!nets[cn2]) nets[cn2] = [];
                 nets[cn2].push(hits[h].des + '-' + hits[h].pin);
-                lastLine = hits[h].line;
+                ll = hits[h].line;
             }
         }
     }
-    return { nets: nets, comps: comps };
+    return { nets, comps };
+}
+
+async function getNetlistText(): Promise<string> {
+    // P1: New API - SCH_ManufactureData.getNetlistFile (replacement for deprecated getNetlist)
+    try {
+        var file = await (eda.sch_ManufactureData as any).getNetlistFile(undefined, 'JLCEDA');
+        if (file) {
+            // File object may have content or need to be read
+            if (typeof file === 'string') return file;
+            if (file.content) return file.content;
+            if (file.data) return file.data;
+            if (file.text) return await file.text();
+            // Try toString
+            var s = String(file);
+            if (s.length > 40) return s;
+        }
+    } catch (_) {}
+
+    // P2: Deprecated getNetlist with JLCEDA
+    try { var nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); if (nl) return nl; } catch (_) {}
+
+    // P3: EasyEDA format
+    try { var nl2 = await eda.sch_Netlist.getNetlist('EasyEDA' as any); if (nl2) return nl2; } catch (_) {}
+
+    // P4: PROTEL2 format
+    try { var nl3 = await eda.sch_Netlist.getNetlist('Protel2' as any); if (nl3) return nl3; } catch (_) {}
+
+    return '';
 }
 
 export async function analyzeSelection(): Promise<void> {
@@ -118,26 +108,17 @@ export async function analyzeSelection(): Promise<void> {
             return;
         }
 
-        // Use PROTEL2 format (gold standard)
-        var nl: string = '';
-        try { nl = await eda.sch_Netlist.getNetlist((eda as any).ESYS_NetlistType?.PROTEL2 || 'PROTEL2'); } catch (e) {}
-        if (!nl) try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) {}
-        if (!nl) try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) {}
-
-        // Raw dump for debugging
+        var nl = await getNetlistText();
         try { (globalThis as any).__nl_raw = nl; } catch (_) {}
-        if (nl) console.log('[NL] raw len=' + nl.length + ' first100=' + nl.substring(0, 100).replace(/\n/g,'\\n'));
 
         var result = parseNetlist(nl);
-
-        // If no components found, show raw data in dialog
-        if (result.comps.size === 0) {
-            var preview = typeof nl === 'string' ? nl.substring(0, 200).replace(/\n/g, ' ') : 'not string';
-            showDialog(ids.length + '选中 ' + result.comps.size + '元件\nRAW: ' + preview);
-        } else {
+        if (result.comps.size > 0) {
             showDialog(ids.length + '选中 ' + result.comps.size + '元件 ' + Object.keys(result.nets).length + '网络');
+        } else {
+            var preview = nl ? nl.substring(0, 200).replace(/\n/g, '\\n') : 'EMPTY';
+            showDialog(ids.length + '选中 0元件 RAW:' + preview);
         }
     } catch (e) {
-        showDialog('分析出错');
+        showDialog('分析出错: ' + (e && (e as any).message || String(e)));
     }
 }
