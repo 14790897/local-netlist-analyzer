@@ -118,14 +118,25 @@ export async function analyzeSelection(): Promise<void> {
             return;
         }
 
-        // Use PROTEL2 format (gold standard from easyeda-ai-assistant)
+        // Use PROTEL2 format (gold standard)
         var nl: string = '';
         try { nl = await eda.sch_Netlist.getNetlist((eda as any).ESYS_NetlistType?.PROTEL2 || 'PROTEL2'); } catch (e) {}
         if (!nl) try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) {}
         if (!nl) try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) {}
 
+        // Raw dump for debugging
+        try { (globalThis as any).__nl_raw = nl; } catch (_) {}
+        if (nl) console.log('[NL] raw len=' + nl.length + ' first100=' + nl.substring(0, 100).replace(/\n/g,'\\n'));
+
         var result = parseNetlist(nl);
-        showDialog(ids.length + '选中 ' + result.comps.size + '元件 ' + Object.keys(result.nets).length + '网络');
+
+        // If no components found, show raw data in dialog
+        if (result.comps.size === 0) {
+            var preview = typeof nl === 'string' ? nl.substring(0, 200).replace(/\n/g, ' ') : 'not string';
+            showDialog(ids.length + '选中 ' + result.comps.size + '元件\nRAW: ' + preview);
+        } else {
+            showDialog(ids.length + '选中 ' + result.comps.size + '元件 ' + Object.keys(result.nets).length + '网络');
+        }
     } catch (e) {
         showDialog('分析出错');
     }
