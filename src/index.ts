@@ -1,12 +1,12 @@
 /**
- * v1.0.20 — use EDA dialog as first output (not console)
+ * v1.0.21 — follow official SDK patterns
  */
-try { eda.sys_Dialog.showInformationMessage('[NL] v1.0.20 loaded'); } catch (_) {}
-
-export function activate(): void {}
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function activate(status?: 'onStartupFinished', arg?: string): void {}
 
 export async function analyzeSelection(): Promise<void> {
     try {
+        // 1. 选中
         var ids: string[] = [];
         try { ids = await (eda.sch_SelectControl as any).getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
         if (!ids || !ids.length) try { ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId(); } catch (_) {}
@@ -16,12 +16,14 @@ export async function analyzeSelection(): Promise<void> {
             return;
         }
 
+        // 2. 网表
         var nl: any = '';
         try { nl = await eda.sch_Netlist.getNetlist('JLCEDA' as any); } catch (e) {}
         if (!nl || (typeof nl === 'string' && !nl.trim())) {
             try { nl = await eda.sch_Netlist.getNetlist('EasyEDA' as any); } catch (e) {}
         }
 
+        // 3. 通用解析
         var nets: Record<string, string[]> = {};
         var comps = new Set<string>();
         var REFPIN = /([A-Za-z]+\d+)-(\d+)/g;
@@ -60,6 +62,6 @@ export async function analyzeSelection(): Promise<void> {
 
         eda.sys_Dialog.showInformationMessage(ids.length + '选中 ' + comps.size + '元件 ' + Object.keys(nets).length + '网络');
     } catch (e) {
-        eda.sys_Dialog.showInformationMessage('分析出错: ' + (e && (e as any).message || String(e)));
+        eda.sys_Dialog.showInformationMessage('分析出错');
     }
 }
