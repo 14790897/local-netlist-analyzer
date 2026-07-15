@@ -72,94 +72,170 @@ function parseV2Netlist(raw: string): { nets: Record<string, string[]>; comps: S
 
 export async function analyzeSelection(): Promise<void> {
     try {
-        // Step 1: Get selected component designators via structured API
-        var selectedDesigs = new Set<string>();
-        try {
-            var primitives = await eda.sch_SelectControl.getAllSelectedPrimitives();
-            if (primitives) {
-                for (var i = 0; i < primitives.length; i++) {
-                    try {
-                        var pt = primitives[i].getState_PrimitiveType && primitives[i].getState_PrimitiveType();
-                        if (!pt || (pt !== 'COMPONENT' && pt !== 6)) continue;
-                        var d = primitives[i].getState_Designator && primitives[i].getState_Designator();
-                        if (d) selectedDesigs.add(d);
-                    } catch (_) {}
-                }
-            }
-        } catch (_) {}
+        var r = await doAnalyze();
+        if (!r.ok) { showDialog(r.error || '请先在原理图中框选需要分析的元件'); return; }
 
-        // Fallback: count via ID
-        var ids: string[] = [];
-        try { ids = await eda.sch_SelectControl.getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
-        if (!ids || !ids.length) try { ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId(); } catch (_) {}
+        // Save files
+        try { await eda.sys_FileSystem.saveFile(new Blob([r.csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
+        if (r.nl) { try { await eda.sys_FileSystem.saveFile(new Blob([r.nl], { type: 'application/json' }), 'netlist-raw.json'); } catch (_2) {} }
 
-        if (!ids || !ids.length) {
-            showDialog('请先在原理图中框选需要分析的元件');
-            return;
-        }
+        // Store for IFrame
+        storeResult(r);
 
-        // Step 2: Parse netlist, filter to selected components
-        var nets: Record<string, string[]> = {};
-        var comps = new Set<string>();
-        var nl = await getNetlistText();
-
-        if (nl) {
-            try {
-                var obj = JSON.parse(nl);
-                var components = obj.components || obj;
-                var ckeys = Object.keys(components);
-
-                for (var k = 0; k < ckeys.length; k++) {
-                    var c = components[ckeys[k]];
-                    if (!c || typeof c !== 'object') continue;
-                    var desig = (c.props && c.props.Designator) || '';
-
-                    // Only process if selected (or if no structured desigs available, take all)
-                    if (selectedDesigs.size > 0 && !selectedDesigs.has(desig)) continue;
-                    if (!desig) continue;
-                    comps.add(desig);
-
-                    var pim = c.pinInfoMap || c.pins || c.pinMap || {};
-                    var pnKeys = Object.keys(pim);
-                    for (var j = 0; j < pnKeys.length; j++) {
-                        var pin = pim[pnKeys[j]];
-                        if (!pin || typeof pin !== 'object') continue;
-                        var net = pin.net || '';
-                        var num = pin.number || pnKeys[j];
-                        if (net && num) {
-                            if (!nets[net]) nets[net] = [];
-                            nets[net].push(desig + '-' + num);
-                        }
-                    }
-                }
-            } catch (_) {}
-        }
-
-        // Step 3: Save first, then show dialog
-        var neta = Object.keys(nets).sort();
-        var summary = ids.length + '选中 ' + comps.size + '元件 ' + neta.length + '网络';
-
-        // Build CSV
-        var csv = 'Net,Designator,Pin\n';
-        for (var ni = 0; ni < neta.length; ni++) {
-            var ents = nets[neta[ni]];
-            for (var ei = 0; ei < ents.length; ei++) csv += neta[ni] + ',' + ents[ei] + '\n';
-        }
-
-        // Save files BEFORE dialog (dialog is modal)
-        try { await eda.sys_FileSystem.saveFile(new Blob([csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
-        if (nl) { try { await eda.sys_FileSystem.saveFile(new Blob([nl], { type: 'application/json' }), 'netlist-raw.json'); } catch(_2) {} }
-
-        // Also store via sys_Storage for IFrame
-        try { eda.sys_Storage.setExtensionUserConfig('__nl_data', JSON.stringify({nets:nets,comps:comps.size,netCount:neta.length})); } catch (_) {}
-
-        // Show summary with first few nets
+        // Show summary
         var detail: string[] = [];
-        for (var dn = 0; dn < Math.min(6, neta.length); dn++) {
-            detail.push(neta[dn] + '(' + nets[neta[dn]].length + 'pin)');
+        for (var dn = 0; dn < Math.min(6, r.neta.length); dn++) {
+            detail.push(r.neta[dn] + '(' + r.nets[r.neta[dn]].length + 'pin)');
         }
-        showDialog(summary + (detail.length > 0 ? ' | ' + detail.join(' ') : ''));
+        showDialog(r.summary + (detail.length > 0 ? ' | ' + detail.join(' ') : ''));
     } catch (e) {
         showDialog('分析出错: ' + (e && (e as any).message || String(e)));
     }
+}
+
+/** Unified AI analysis — extract netlist then directly open AI chat */
+export async function aiAnalyzeSelection(): Promise<void> {
+    try {
+        var r = await doAnalyze();
+        if (!r.ok) { showDialog(r.error || '请先在原理图中框选需要分析的元件'); return; }
+
+        // Save files silently
+        try { await eda.sys_FileSystem.saveFile(new Blob([r.csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
+        if (r.nl) { try { await eda.sys_FileSystem.saveFile(new Blob([r.nl], { type: 'application/json' }), 'netlist-raw.json'); } catch (_2) {} }
+
+        // Store for chat IFrame
+        storeResult(r);
+
+        // Check API config
+        var cfg = loadAIConfig();
+
+        if (!cfg.key) {
+            showDialog('请先配置 AI API Key（将在设置面板中打开）');
+            try { eda.sys_IFrame.openIFrame('/iframe/settings.html', 520, 480, 'ai-settings', { title: 'AI 设置 — 请先配置 API Key' }); } catch (_) {}
+            return;
+        }
+
+        // Open chat directly
+        try {
+            eda.sys_IFrame.openIFrame('/iframe/chat.html', 700, 560, 'ai-chat', {
+                title: 'AI 分析: ' + r.comps.size + '元件 ' + r.neta.length + '网络',
+                maximizeButton: true,
+            });
+        } catch (_) {
+            showDialog(r.summary + ' — IFrame 打开失败，请手动点击 AI 对话');
+        }
+    } catch (e) {
+        showDialog('分析出错: ' + (e && (e as any).message || String(e)));
+    }
+}
+
+// ====== Internal ======
+
+interface AnalysisResult {
+    ok: boolean;
+    error?: string;
+    ids: string[];
+    nets: Record<string, string[]>;
+    comps: Set<string>;
+    neta: string[];
+    nl: string;
+    csv: string;
+    summary: string;
+}
+
+async function doAnalyze(): Promise<AnalysisResult> {
+    var empty: AnalysisResult = { ok: false, ids: [], nets: {}, comps: new Set(), neta: [], nl: '', csv: '', summary: '' };
+
+    var selectedDesigs = new Set<string>();
+    try {
+        var primitives = await eda.sch_SelectControl.getAllSelectedPrimitives();
+        if (primitives) {
+            for (var i = 0; i < primitives.length; i++) {
+                try {
+                    var pt = primitives[i].getState_PrimitiveType && primitives[i].getState_PrimitiveType();
+                    if (!pt || (pt !== 'COMPONENT' && pt !== 6)) continue;
+                    var d = primitives[i].getState_Designator && primitives[i].getState_Designator();
+                    if (d) selectedDesigs.add(d);
+                } catch (_) {}
+            }
+        }
+    } catch (_) {}
+
+    var ids: string[] = [];
+    try { ids = await eda.sch_SelectControl.getAllSelectedPrimitives_PrimitiveId(); } catch (_) {}
+    if (!ids || !ids.length) try { ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId(); } catch (_) {}
+
+    if (!ids || !ids.length) {
+        empty.error = '请先在原理图中框选需要分析的元件';
+        return empty;
+    }
+
+    var nets: Record<string, string[]> = {};
+    var comps = new Set<string>();
+    var nl = await getNetlistText();
+
+    if (nl) {
+        try {
+            var obj = JSON.parse(nl);
+            var components = obj.components || obj;
+            var ckeys = Object.keys(components);
+            for (var k = 0; k < ckeys.length; k++) {
+                var c = components[ckeys[k]];
+                if (!c || typeof c !== 'object') continue;
+                var desig = (c.props && c.props.Designator) || '';
+                if (selectedDesigs.size > 0 && !selectedDesigs.has(desig)) continue;
+                if (!desig) continue;
+                comps.add(desig);
+                var pim = c.pinInfoMap || c.pins || c.pinMap || {};
+                var pnKeys = Object.keys(pim);
+                for (var j = 0; j < pnKeys.length; j++) {
+                    var pin = pim[pnKeys[j]];
+                    if (!pin || typeof pin !== 'object') continue;
+                    var net = pin.net || '';
+                    var num = pin.number || pnKeys[j];
+                    if (net && num) {
+                        if (!nets[net]) nets[net] = [];
+                        nets[net].push(desig + '-' + num);
+                    }
+                }
+            }
+        } catch (_) {}
+    }
+
+    var neta = Object.keys(nets).sort();
+    var csv = 'Net,Designator,Pin\n';
+    for (var ni = 0; ni < neta.length; ni++) {
+        var ents = nets[neta[ni]];
+        for (var ei = 0; ei < ents.length; ei++) csv += neta[ni] + ',' + ents[ei] + '\n';
+    }
+
+    return {
+        ok: true,
+        ids: ids,
+        nets: nets,
+        comps: comps,
+        neta: neta,
+        nl: nl,
+        csv: csv,
+        summary: ids.length + '选中 ' + comps.size + '元件 ' + neta.length + '网络'
+    };
+}
+
+function storeResult(r: AnalysisResult): void {
+    try {
+        eda.sys_Storage.setExtensionUserConfig('__nl_data', JSON.stringify({
+            nets: r.nets,
+            comps: r.comps.size,
+            netCount: r.neta.length
+        }));
+    } catch (_) {}
+}
+
+/** Read AI config — inline copy from ai.ts to avoid circular dep */
+function loadAIConfig(): any {
+    try {
+        var raw = eda.sys_Storage.getExtensionUserConfig('__ai_config');
+        if (raw) return JSON.parse(raw);
+    } catch (_) {}
+    return { endpoint: 'https://api.openai.com/v1', key: '', model: 'gpt-4o-mini' };
 }

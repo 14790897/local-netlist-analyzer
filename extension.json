@@ -30,6 +30,11 @@
 				"title": "局部网表",
 				"menuItems": [
 					{
+						"id": "ai-analyze",
+						"title": "AI 分析局部网表",
+						"registerFn": "aiAnalyzeSelection"
+					},
+					{
 						"id": "analyze-selection",
 						"title": "分析选中区域网表",
 						"registerFn": "analyzeSelection"
@@ -52,6 +57,11 @@
 				"id": "local-netlist",
 				"title": "局部网表",
 				"menuItems": [
+					{
+						"id": "ai-analyze",
+						"title": "AI 分析局部网表",
+						"registerFn": "aiAnalyzeSelection"
+					},
 					{
 						"id": "analyze-selection",
 						"title": "分析选中区域网表",
