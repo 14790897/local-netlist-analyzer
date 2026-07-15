@@ -23,43 +23,53 @@ const mockComponents = [
     ]},
 ];
 
-// JLCEDA 格式网表
-var mockNetlist = [
-    '(VCC U1-3)',
-    '(GND R1-1)',
-    '(GND R2-1)',
-    '(NET_PB8 U1-1 R1-2)',
-    '(NET_PB9 U1-2 R2-2)',
-].join('\n');
+// JLCEDA v2.0.0 格式网表 (真实 JSON 格式)
+var mockNetlist = JSON.stringify({
+    version: '2.0.0',
+    components: {
+        gge1: {
+            props: { Designator: 'U1' },
+            pinInfoMap: { '1': { net: '3V3' }, '2': { net: 'GND' }, '3': { net: 'VCC' } }
+        },
+        gge2: {
+            props: { Designator: 'R1' },
+            pinInfoMap: { '1': { net: 'GND' }, '2': { net: 'NET_PB8' } }
+        },
+        gge3: {
+            props: { Designator: 'R2' },
+            pinInfoMap: { '1': { net: 'GND' }, '2': { net: 'NET_PB9' } }
+        }
+    }
+});
+
+// 模拟 Blob 文本 -> File 对象 (新版 API 返回 File)
+function makeFile(text) {
+    return {
+        text: async function () { return text; },
+        arrayBuffer: async function () {
+            return new TextEncoder().encode(text).buffer;
+        },
+    };
+}
 
 global.eda = {
     sch_SelectControl: {
-        getAllSelectedPrimitives: async function () {
-            return mockComponents.map(function (comp) {
-                return {
-                    getState_PrimitiveType: function () { return 'Component'; },
-                    getState_PrimitiveId: function () { return 'id_' + comp.designator; },
-                    getState_Designator: function () { return comp.designator; },
-                    getState_Name: function () { return comp.name; },
-                    getState_Manufacturer: function () { return comp.designator === 'U1' ? 'STMicro' : ''; },
-                    getState_ManufacturerId: function () { return comp.designator === 'U1' ? 'C8734' : ''; },
-                    getAllPins: async function () {
-                        return comp.pins.map(function (p) {
-                            return { pinNumber: p.pinNumber, pinName: p.pinName };
-                        });
-                    },
-                };
-            });
+        getAllSelectedPrimitives_PrimitiveId: async function () {
+            return mockComponents.map(function (comp) { return 'id_' + comp.designator; });
+        },
+        getSelectedPrimitives_PrimitiveId: async function () {
+            return mockComponents.map(function (comp) { return 'id_' + comp.designator; });
         },
     },
-    sch_Netlist: {
-        getNetlist: async function () {
-            return mockNetlist;
+    // Official API: sch_ManufactureData.getNetlistFile() (per prodocs.lceda.cn)
+    sch_ManufactureData: {
+        getNetlistFile: async function (fileName, netlistType) {
+            console.log('  [mock] sch_ManufactureData.getNetlistFile() called, type=' + (netlistType || 'default'));
+            return makeFile(mockNetlist);
         },
     },
     sys_Dialog: {
         showInformationMessage: function (msg) { mockDialogMsgs.push('[INFO] ' + msg); },
-        showWarningMessage: function (msg) { mockDialogMsgs.push('[WARN] ' + msg); },
     },
     sys_ToastMessage: {
         showToastMessage: function (msg) { mockToastMsgs.push(msg); },
@@ -69,17 +79,12 @@ global.eda = {
     },
 };
 
-// ====== Load Plugin ======
+// ====== Load Plugin (IIFE → globalThis) ======
 var distCode = fs.readFileSync(path.join(__dirname, '..', 'dist', 'index.js'), 'utf-8');
-eval(distCode);
-
-// esbuild IIFE format: var edaEsbuildExportName = (()=>{...})()
-// 替换为直接导出
-var exportCode = distCode.replace(
-    /var edaEsbuildExportName = \(\(\) => \{/,
-    'module.exports = (() => {'
-);
-var analyzeSelection = eval(exportCode).analyzeSelection;
+// Replace 'var edaEsbuildExportName' with 'globalThis.edaEsbuildExportName' so indirect eval works
+var globalCode = distCode.replace('var edaEsbuildExportName', 'globalThis.edaEsbuildExportName');
+var _eval = eval; (0, _eval)(globalCode);
+var analyzeSelection = globalThis.edaEsbuildExportName.analyzeSelection;
 
 // ====== Run Test ======
 async function runTest() {

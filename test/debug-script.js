@@ -1,14 +1,19 @@
-// 独立调试脚本 — 运行脚本里粘贴运行
+// 独立调试脚本 v1.0.27 — 使用新 API sch_ManufactureData.getNetlistFile()
+// 在嘉立创 EDA 控制台粘贴运行
 (async function() {
     try {
         console.log('=== 1. 选中检测 ===');
         var ids = await eda.sch_SelectControl.getAllSelectedPrimitives_PrimitiveId();
         console.log('ids=' + ids.length);
 
-        console.log('=== 2. 获取网表 ===');
-        var nl = await eda.sch_Netlist.getNetlist('JLCEDA');
+        console.log('=== 2. 获取网表 (新API) ===');
+        var file = await eda.sch_ManufactureData.getNetlistFile('netlist', 'JLCEDA');
+        var nl = '';
+        if (file) {
+            nl = typeof file.text === 'function' ? await file.text() : String(file);
+        }
         console.log('type=' + typeof nl);
-        var raw = JSON.stringify(nl);
+        var raw = typeof nl === 'string' ? nl : JSON.stringify(nl);
         console.log('RAW(' + raw.length + 'c): ' + raw.substring(0, 500));
 
         console.log('=== 3. 格式检测 ===');

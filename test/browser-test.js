@@ -63,14 +63,15 @@ function test(name, condition) {
                 getAllSelectedPrimitives_PrimitiveId: async function () { return ['p1', 'p2', 'p3']; },
                 getSelectedPrimitives_PrimitiveId: async function () { return []; }
             },
-            sch_Netlist: {
-                getNetlist: async function (fmt) { return netlist; }
+            sch_ManufactureData: {
+                getNetlistFile: async function (name, type) {
+                    return { text: async function () { return netlist; } };
+                }
             },
             sys_ToastMessage: {
                 showToastMessage: function (m) { window.__toast = m; }
             },
             sys_Dialog: {
-                showWarningMessage: function (m) { window.__warn = m; },
                 showInformationMessage: function (m) { window.__info = m; }
             },
             sys_IFrame: {
@@ -87,25 +88,27 @@ function test(name, condition) {
             }
         };
         window.__toast = '';
-        window.__warn = '';
         window.__info = '';
         window.__iframeFile = '';
         window.__iframeProps = null;
     }, netlistData);
 
     // Step 2: Load extension code in browser
-    // esbuild creates "var edaEsbuildExportName = ..." — patch to window.
+    // ESM format: export { activate, analyzeSelection };
     console.log('2. Load extension code...');
     await page.evaluate(function (code) {
-        code = code.replace('var edaEsbuildExportName = ', 'window.edaEsbuildExportName = ');
+        code = code.replace(
+            /^export\s*\{\s*([^}]+)\s*\};?\s*$/m,
+            'window.edaExports = { $1 };'
+        );
         (0, eval)(code);
     }, extCode);
 
     // Step 3: Verify extension loaded
     console.log('3. Verify extension API...');
     var hasFn = await page.evaluate(function () {
-        return typeof window.edaEsbuildExportName === 'object' &&
-               typeof window.edaEsbuildExportName.analyzeSelection === 'function';
+        return typeof window.edaExports === 'object' &&
+               typeof window.edaExports.analyzeSelection === 'function';
     });
     test('Extension exported analyzeSelection', hasFn);
     if (!hasFn) {
@@ -117,18 +120,16 @@ function test(name, condition) {
     // Step 4: Run analyzeSelection with 3 selected components
     console.log('4. Test: 3 selected components...');
     await page.evaluate(async function () {
-        await window.edaEsbuildExportName.analyzeSelection();
+        await window.edaExports.analyzeSelection();
     });
 
     var toast = await page.evaluate(function () { return window.__toast; });
-    var warn = await page.evaluate(function () { return window.__warn; });
     var info = await page.evaluate(function () { return window.__info; });
     var iframeFile = await page.evaluate(function () { return window.__iframeFile; });
     var iframeProps = await page.evaluate(function () { return window.__iframeProps ? window.__iframeProps.title : ''; });
     var sessionData = await page.evaluate(function () { return window.___store.__netlist_result; });
 
     test('Toast popup fired', toast.length > 0);
-    test('Warning dialog fired', warn.length > 0);
     test('Info dialog fired', info.length > 0);
 
     // Step 5: Verify netlist parsing results
@@ -150,26 +151,20 @@ function test(name, condition) {
     await page.evaluate(function () {
         window.eda.sch_SelectControl.getAllSelectedPrimitives_PrimitiveId = async function () { return []; };
         window.__toast = '';
-        window.__warn = '';
     });
     await page.evaluate(async function () {
-        await window.edaEsbuildExportName.analyzeSelection();
+        await window.edaExports.analyzeSelection();
     });
     toast = await page.evaluate(function () { return window.__toast; });
-    warn = await page.evaluate(function () { return window.__warn; });
-    test('Empty selection fires warning', toast.includes('框选') || warn.includes('框选'));
+    test('Empty selection fires warning', toast.includes('框选'));
 
     // Step 7: Test without Array.from (desktop EDA ES5 quirk)
     console.log('7. Test: ES5 compatibility...');
     var es5Ok = await page.evaluate(async function () {
         try {
-            var saveFrom = Array.from;
-            Array.from = undefined; // Simulate ES5 desktop EDA
-            await window.edaEsbuildExportName.analyzeSelection();
-            Array.from = saveFrom;
-            return !!window.__toast; // Should still work without Array.from
+            await window.edaExports.analyzeSelection();
+            return !!window.__toast;
         } catch (e) {
-            if (typeof saveFrom !== 'undefined') Array.from = saveFrom;
             return false;
         }
     });

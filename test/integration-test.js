@@ -1,5 +1,5 @@
 /**
- * v1.0.17 Integration test — uses real JLCEDA NET: format
+ * v1.0.26 Integration test — new sch_ManufactureData.getNetlistFile() API
  */
 'use strict';
 var fs = require('fs');
@@ -8,7 +8,7 @@ var distPath = path.join(__dirname, '..', 'dist', 'index.js');
 var code = fs.readFileSync(distPath, 'utf-8');
 
 async function run() {
-    console.log('=== Integration Test: v1.0.17 ===\n');
+    console.log('=== Integration Test: v1.0.26 ===\n');
 
     // Real JLCEDA NET: format netlist
     var realNetlist = [
@@ -31,19 +31,30 @@ async function run() {
         '  U3-1'
     ].join('\n');
 
+    // Simulate File object returned by new API
+    function makeFile(text) {
+        return {
+            text: async function () { return text; },
+            arrayBuffer: async function () { return new TextEncoder().encode(text).buffer; },
+        };
+    }
+
     global.eda = {
         sch_SelectControl: {
             getAllSelectedPrimitives_PrimitiveId: async function() { return ['p1','p2','p3'];}
         },
-        sch_Netlist: {
-            getNetlist: async function() { return realNetlist; }
+        // Official API (per prodocs.lceda.cn)
+        sch_ManufactureData: {
+            getNetlistFile: async function(fileName, netlistType) {
+                console.log('  [itest] getNetlistFile called, type=' + (netlistType || 'default'));
+                return makeFile(realNetlist);
+            }
         },
         sys_IFrame: {
             openIFrame: async function() { return true; }
         },
         sys_Dialog: {
-            showInformationMessage: function() {},
-            showWarningMessage: function() {}
+            showInformationMessage: function() {}
         },
         sys_ToastMessage: { showToastMessage: function() {} },
         sys_FileSystem: { saveFile: async function() {} }
@@ -51,11 +62,12 @@ async function run() {
     global.sessionStorage = { setItem:function(){}, getItem:function(){} };
 
     console.log('1. Loading...');
-    eval(code.replace('var edaEsbuildExportName','globalThis.edaEsbuildExportName'));
+    var globalCode = code.replace('var edaEsbuildExportName', 'globalThis.edaEsbuildExportName');
+    var _eval = eval; (0, _eval)(globalCode);
     console.log('   OK\n');
 
     console.log('2. Full analysis...');
-    await edaEsbuildExportName.analyzeSelection();
+    await globalThis.edaEsbuildExportName.analyzeSelection();
     console.log('   PASS\n');
     console.log('=== DONE ===');
 }
