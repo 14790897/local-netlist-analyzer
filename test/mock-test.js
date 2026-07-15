@@ -10,17 +10,18 @@ const fs = require('fs');
 // ====== Mock EDA Global ======
 const mockDialogMsgs = [];
 const mockToastMsgs = [];
-const mockIFrames = [];
+const mockSavedFiles = [];
+const mockStorage = {};
 
 // 模拟原理图: R1, R2, U1
 const mockComponents = [
-    { designator: 'R1', name: '10k Resistor', pins: [{ pinNumber: '1', pinName: 'A' }, { pinNumber: '2', pinName: 'B' }] },
-    { designator: 'R2', name: '1k Resistor',  pins: [{ pinNumber: '1', pinName: 'A' }, { pinNumber: '2', pinName: 'B' }] },
     { designator: 'U1', name: 'STM32F103C8T6', pins: [
         { pinNumber: '1', pinName: 'PB8' },
         { pinNumber: '2', pinName: 'PB9' },
         { pinNumber: '3', pinName: 'VDD' },
     ]},
+    { designator: 'R1', name: '10k Resistor', pins: [{ pinNumber: '1', pinName: 'A' }, { pinNumber: '2', pinName: 'B' }] },
+    { designator: 'R2', name: '1k Resistor',  pins: [{ pinNumber: '1', pinName: 'A' }, { pinNumber: '2', pinName: 'B' }] },
 ];
 
 // JLCEDA v2.0.0 格式网表 (真实 JSON 格式)
@@ -42,18 +43,28 @@ var mockNetlist = JSON.stringify({
     }
 });
 
-// 模拟 Blob 文本 -> File 对象 (新版 API 返回 File)
+// 模拟 Blob
+global.Blob = function (parts, opts) { return { _parts: parts, _type: opts && opts.type }; };
+
+// 模拟 File 对象 (getNetlistFile 返回)
 function makeFile(text) {
     return {
         text: async function () { return text; },
-        arrayBuffer: async function () {
-            return new TextEncoder().encode(text).buffer;
-        },
+        arrayBuffer: async function () { return new TextEncoder().encode(text).buffer; },
     };
 }
 
 global.eda = {
     sch_SelectControl: {
+        // Structured API: returns primitives with getState_PrimitiveType / getState_Designator
+        getAllSelectedPrimitives: async function () {
+            return mockComponents.map(function (comp) {
+                return {
+                    getState_PrimitiveType: function () { return 'COMPONENT'; },
+                    getState_Designator: function () { return comp.designator; }
+                };
+            });
+        },
         getAllSelectedPrimitives_PrimitiveId: async function () {
             return mockComponents.map(function (comp) { return 'id_' + comp.designator; });
         },
@@ -61,21 +72,26 @@ global.eda = {
             return mockComponents.map(function (comp) { return 'id_' + comp.designator; });
         },
     },
-    // Official API: sch_ManufactureData.getNetlistFile() (per prodocs.lceda.cn)
     sch_ManufactureData: {
         getNetlistFile: async function (fileName, netlistType) {
             console.log('  [mock] sch_ManufactureData.getNetlistFile() called, type=' + (netlistType || 'default'));
             return makeFile(mockNetlist);
         },
     },
+    sys_FileSystem: {
+        saveFile: async function (blob, fileName) {
+            mockSavedFiles.push({ name: fileName, type: blob._type });
+        },
+    },
+    sys_Storage: {
+        setExtensionUserConfig: function (k, v) { mockStorage[k] = v; },
+        getExtensionUserConfig: function (k) { return mockStorage[k]; },
+    },
     sys_Dialog: {
         showInformationMessage: function (msg) { mockDialogMsgs.push('[INFO] ' + msg); },
     },
     sys_ToastMessage: {
         showToastMessage: function (msg) { mockToastMsgs.push(msg); },
-    },
-    sys_IFrame: {
-        showIFrame: function (opts) { mockIFrames.push(opts); },
     },
 };
 
@@ -92,52 +108,37 @@ async function runTest() {
 
     mockDialogMsgs.length = 0;
     mockToastMsgs.length = 0;
-    mockIFrames.length = 0;
+    mockSavedFiles.length = 0;
+    Object.keys(mockStorage).forEach(function (k) { delete mockStorage[k]; });
 
     await analyzeSelection();
 
-    console.log('Toast:', mockToastMsgs);
-    console.log('Dialog:', mockDialogMsgs);
+    console.log('Dialog:', mockDialogMsgs.join('\n'));
+    console.log('Saved files:', mockSavedFiles.map(function (f) { return f.name; }).join(', '));
+    console.log('Storage keys:', Object.keys(mockStorage).join(', '));
 
-    if (mockIFrames.length > 0) {
-        var html = mockIFrames[0].htmlContent;
-        console.log('\n=== FULL HTML (first 2000 chars) ===');
-        console.log(html.substring(0, 2000));
-        console.log('=== END ===');
-        var hasR1 = html.includes('R1');
-        var hasU1 = html.includes('U1');
-        var hasVCC = html.includes('VCC');
-        var hasGND = html.includes('GND');
-        var hasNET = html.includes('NET_PB8');
+    // Verify dialog contains expected data
+    var dialog = mockDialogMsgs[0] || '';
+    var hasComps = dialog.indexOf('3元件') >= 0;
+    var hasNets = dialog.indexOf('5网络') >= 0;
+    var hasVCC = dialog.indexOf('3V3') >= 0;
+    var hasGND = dialog.indexOf('GND') >= 0;
+    var csvSaved = mockSavedFiles.some(function (f) { return f.name === 'local-netlist.csv'; });
+    var jsonSaved = mockSavedFiles.some(function (f) { return f.name === 'netlist-raw.json'; });
+    var storageOk = !!mockStorage.__nl_data;
 
-        console.log('\nIFrame checks:');
-        console.log('  R1:', hasR1 ? '✅' : '❌');
-        console.log('  U1:', hasU1 ? '✅' : '❌');
-        console.log('  VCC:', hasVCC ? '✅' : '❌');
-        console.log('  GND:', hasGND ? '✅' : '❌');
-        console.log('  NET_PB8:', hasNET ? '✅' : '❌');
+    console.log('\nChecks:');
+    console.log('  Found 3 components:', hasComps ? '✅' : '❌');
+    console.log('  Found 5 networks:', hasNets ? '✅' : '❌');
+    console.log('  Has 3V3 net:', hasVCC ? '✅' : '❌');
+    console.log('  Has GND net:', hasGND ? '✅' : '❌');
+    console.log('  CSV saved:', csvSaved ? '✅' : '❌');
+    console.log('  JSON saved:', jsonSaved ? '✅' : '❌');
+    console.log('  Storage data:', storageOk ? '✅' : '❌');
 
-        var allPass = hasR1 && hasU1 && hasVCC && hasGND && hasNET;
-
-        // 提取网表文本
-        var m = html.match(/<pre>([\s\S]*?)<\/pre>/);
-        if (m) {
-            var text = m[1]
-                .replace(/&lt;/g, '<')
-                .replace(/&gt;/g, '>')
-                .replace(/&amp;/g, '&');
-            console.log('\n--- 生成的网表 ---');
-            console.log(text);
-        }
-
-        console.log('\n' + (allPass ? '✅ ALL PASS' : '❌ SOME FAILED'));
-    } else {
-        console.log('❌ No IFrame output');
-        if (mockDialogMsgs.length > 0) {
-            console.log('Dialogs:', mockDialogMsgs);
-        }
-    }
-    console.log('');
+    var allPass = hasComps && hasNets && hasVCC && hasGND && csvSaved && jsonSaved && storageOk;
+    console.log('\n' + (allPass ? '✅ ALL PASS' : '❌ SOME FAILED'));
+    if (!allPass) process.exit(1);
 }
 
 runTest().catch(function (err) {

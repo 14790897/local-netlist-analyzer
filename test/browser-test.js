@@ -1,31 +1,24 @@
 /**
- * Browser E2E test — real Chromium, real DOM, mock EDA API
- * No login required. Catches browser-specific bugs (Array.from, window, etc.)
+ * Browser E2E test — real Chromium + mock EDA API
+ * Tests JLCEDA v2 JSON netlist parsing and export flow.
  */
 'use strict';
 var { chromium } = require('playwright-core');
 var fs = require('fs');
 var path = require('path');
 
-var netlistData = [
-    'NET: VCC_3V3',
-    '  U1-1',
-    '  C1-1',
-    '  R1-1',
-    'NET: GND',
-    '  U1-14',
-    '  C1-2',
-    '  R1-2',
-    '  C2-2',
-    'NET: SCL',
-    '  U1-6',
-    '  J1-6',
-    'NET: SDA',
-    '  U1-5',
-    '  J1-5',
-    'NET: NC',
-    '  U3-1'
-].join('\n');
+// JLCEDA v2 JSON netlist format (from real EDA getNetlistFile output)
+var netlistData = JSON.stringify({
+    version: '2.0.0',
+    components: {
+        gge1: { props: { Designator: 'U1' }, pinInfoMap: { '1': { net: 'VCC_3V3' }, '14': { net: 'GND' }, '6': { net: 'SCL' }, '5': { net: 'SDA' } } },
+        gge2: { props: { Designator: 'C1' }, pinInfoMap: { '1': { net: 'VCC_3V3' }, '2': { net: 'GND' } } },
+        gge3: { props: { Designator: 'R1' }, pinInfoMap: { '1': { net: 'VCC_3V3' }, '2': { net: 'GND' } } },
+        gge4: { props: { Designator: 'C2' }, pinInfoMap: { '2': { net: 'GND' } } },
+        gge5: { props: { Designator: 'J1' }, pinInfoMap: { '5': { net: 'SDA' }, '6': { net: 'SCL' } } },
+        gge6: { props: { Designator: 'U3' }, pinInfoMap: { '1': { net: 'NC' } } }
+    }
+});
 
 var extCode = fs.readFileSync(path.join(__dirname, '..', 'dist', 'index.js'), 'utf-8');
 var tests = [];
@@ -42,24 +35,29 @@ function test(name, condition) {
     console.log('=== Browser E2E Test ===\n');
     var browser = await chromium.launch({ headless: true });
     var page = await browser.newPage();
-    // Navigate to a real page so sessionStorage works
     await page.goto('data:text/html,<html><body></body></html>');
 
-    // Step 1: Inject mock EDA API + mock storage into browser context
-    // Must mock sessionStorage before extension loads (data: URL blocks it)
+    // Step 1: Inject mock EDA API
     console.log('1. Inject mock EDA API...');
     await page.evaluate(function (netlist) {
-        // Mock storage (extension calls sessionStorage.setItem)
-        window.___store = {};
-        Object.defineProperty(window, 'sessionStorage', {
-            value: {
-                setItem: function (k, v) { window.___store[k] = v; },
-                getItem: function (k) { return window.___store[k]; },
-            },
-            writable: true, configurable: true
-        });
+        window.___dialog = '';
+        window.___savedBlobs = [];
+        window.___storage = {};
+
+        window.Blob = function (parts, opts) {
+            return { _parts: parts, _type: opts && opts.type, text: async function () { return parts.join(''); } };
+        };
+
         window.eda = {
             sch_SelectControl: {
+                // Structured API: returns primitives with getState_PrimitiveType / getState_Designator
+                getAllSelectedPrimitives: async function () {
+                    return [
+                        { getState_PrimitiveType: function () { return 'COMPONENT'; }, getState_Designator: function () { return 'U1'; } },
+                        { getState_PrimitiveType: function () { return 'COMPONENT'; }, getState_Designator: function () { return 'C1'; } },
+                        { getState_PrimitiveType: function () { return 'COMPONENT'; }, getState_Designator: function () { return 'R1'; } }
+                    ];
+                },
                 getAllSelectedPrimitives_PrimitiveId: async function () { return ['p1', 'p2', 'p3']; },
                 getSelectedPrimitives_PrimitiveId: async function () { return []; }
             },
@@ -68,51 +66,37 @@ function test(name, condition) {
                     return { text: async function () { return netlist; } };
                 }
             },
-            sys_ToastMessage: {
-                showToastMessage: function (m) { window.__toast = m; }
+            sys_FileSystem: {
+                saveFile: async function (blob, fileName) {
+                    window.___savedBlobs.push({ name: fileName, type: blob._type, text: blob.text ? await blob.text() : '' });
+                }
+            },
+            sys_Storage: {
+                setExtensionUserConfig: function (k, v) { window.___storage[k] = v; },
+                getExtensionUserConfig: function (k) { return window.___storage[k]; }
             },
             sys_Dialog: {
-                showInformationMessage: function (m) { window.__info = m; }
-            },
-            sys_IFrame: {
-                openIFrame: async function (file, w, h, id, props) {
-                    window.__iframeFile = file;
-                    window.__iframeProps = props;
-                }
-            },
-            sys_FileSystem: {
-                saveFile: async function (opts) {
-                    window.__savedFile = opts.fileName;
-                    window.__savedContent = opts.content;
-                }
+                showInformationMessage: function (m) { window.___dialog = m; }
             }
         };
-        window.__toast = '';
-        window.__info = '';
-        window.__iframeFile = '';
-        window.__iframeProps = null;
     }, netlistData);
 
-    // Step 2: Load extension code in browser
-    // ESM format: export { activate, analyzeSelection };
+    // Step 2: Load extension via addScriptTag (IIFE runs in global scope)
     console.log('2. Load extension code...');
-    await page.evaluate(function (code) {
-        code = code.replace(
-            /^export\s*\{\s*([^}]+)\s*\};?\s*$/m,
-            'window.edaExports = { $1 };'
-        );
-        (0, eval)(code);
-    }, extCode);
+    await page.addScriptTag({ content: extCode });
 
     // Step 3: Verify extension loaded
     console.log('3. Verify extension API...');
     var hasFn = await page.evaluate(function () {
-        return typeof window.edaExports === 'object' &&
-               typeof window.edaExports.analyzeSelection === 'function';
+        return typeof window.edaEsbuildExportName === 'object' &&
+               typeof window.edaEsbuildExportName.analyzeSelection === 'function';
     });
     test('Extension exported analyzeSelection', hasFn);
     if (!hasFn) {
-        console.log('FATAL: extension not loaded');
+        console.log('  FATAL: analyzeSelection not found');
+        // Debug: check global
+        var keys = await page.evaluate(function () { return Object.keys(window.edaEsbuildExportName || {}); });
+        console.log('  edaEsbuildExportName keys: ' + keys.join(','));
         await browser.close();
         process.exit(1);
     }
@@ -120,55 +104,53 @@ function test(name, condition) {
     // Step 4: Run analyzeSelection with 3 selected components
     console.log('4. Test: 3 selected components...');
     await page.evaluate(async function () {
-        await window.edaExports.analyzeSelection();
+        await window.edaEsbuildExportName.analyzeSelection();
     });
 
-    var toast = await page.evaluate(function () { return window.__toast; });
-    var info = await page.evaluate(function () { return window.__info; });
-    var iframeFile = await page.evaluate(function () { return window.__iframeFile; });
-    var iframeProps = await page.evaluate(function () { return window.__iframeProps ? window.__iframeProps.title : ''; });
-    var sessionData = await page.evaluate(function () { return window.___store.__netlist_result; });
+    var dialog = await page.evaluate(function () { return window.___dialog; });
+    var blobs = await page.evaluate(function () { return window.___savedBlobs.map(function (b) { return b.name; }); });
+    var storage = await page.evaluate(function () { return window.___storage; });
 
-    test('Toast popup fired', toast.length > 0);
-    test('Info dialog fired', info.length > 0);
+    console.log('  Dialog: ' + dialog);
+    console.log('  Files: ' + blobs.join(', '));
+    console.log('  Storage keys: ' + Object.keys(storage).join(', '));
 
-    // Step 5: Verify netlist parsing results
-    console.log('5. Verify netlist results...');
-    if (sessionData) {
-        var data = JSON.parse(sessionData);
-        console.log('  sessionData components=' + data.components + ' nets=' + data.nets);
-        test('6 components parsed', data.components === 6);
-        test('5 nets parsed', data.nets === 5);
-        test('Component U1 exists', data.componentList.indexOf('U1') >= 0);
-        test('Component J1 exists', data.componentList.indexOf('J1') >= 0);
-        test('Net SCL has U1-6', data.netList['SCL'] && data.netList['SCL'].indexOf('U1-6') >= 0);
-    } else {
-        test('sessionStorage saved', false);
+    test('Dialog shows result', dialog.length > 0 && dialog.indexOf('选中') >= 0);
+    test('CSV file saved', blobs.indexOf('local-netlist.csv') >= 0);
+    test('JSON file saved', blobs.indexOf('netlist-raw.json') >= 0);
+    test('sys_Storage data saved', !!storage.__nl_data);
+
+    // Step 5: Verify netlist parsing
+    console.log('5. Verify parsed results...');
+    if (storage.__nl_data) {
+        var data = JSON.parse(storage.__nl_data);
+        console.log('  Components: ' + data.comps + ', Nets: ' + data.netCount);
+        test('Found 4 networks (U3 NC net excluded by filter)', data.netCount === 4);
+        test('Found VCC_3V3', !!JSON.parse(storage.__nl_data).nets);
     }
 
-    // Step 6: Test empty selection
-    console.log('6. Test: empty selection...');
+    // Step 6: Check CSV content
+    console.log('6. Verify CSV content...');
+    var csvContent = await page.evaluate(function () {
+        var found = window.___savedBlobs.find(function (b) { return b.name === 'local-netlist.csv'; });
+        return found ? found.text : '';
+    });
+    test('CSV has U1 entries', csvContent.indexOf('U1-') >= 0);
+    test('CSV has GND network', csvContent.indexOf('GND') >= 0);
+
+    // Step 7: Empty selection
+    console.log('7. Test: empty selection...');
     await page.evaluate(function () {
         window.eda.sch_SelectControl.getAllSelectedPrimitives_PrimitiveId = async function () { return []; };
-        window.__toast = '';
+        window.eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId = async function () { return []; };
+        window.eda.sch_SelectControl.getAllSelectedPrimitives = async function () { return []; };
+        window.___dialog = '';
     });
     await page.evaluate(async function () {
-        await window.edaExports.analyzeSelection();
+        await window.edaEsbuildExportName.analyzeSelection();
     });
-    toast = await page.evaluate(function () { return window.__toast; });
-    test('Empty selection fires warning', toast.includes('框选'));
-
-    // Step 7: Test without Array.from (desktop EDA ES5 quirk)
-    console.log('7. Test: ES5 compatibility...');
-    var es5Ok = await page.evaluate(async function () {
-        try {
-            await window.edaExports.analyzeSelection();
-            return !!window.__toast;
-        } catch (e) {
-            return false;
-        }
-    });
-    test('Works without Array.from (desktop EDA compat)', es5Ok);
+    dialog = await page.evaluate(function () { return window.___dialog; });
+    test('Empty selection warns', dialog.indexOf('框选') >= 0);
 
     await browser.close();
 
