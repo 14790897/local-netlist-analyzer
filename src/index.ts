@@ -2,6 +2,7 @@
  * v1.0.28 — Exact JSON parser for JLCEDA netlist format v2.0.0
  * Format: {version,components:{"gge1":{props:{Designator:"U1"},pinInfoMap:{"1":{net:"VCC"}}}}}
  */
+export { openSettings, openAIChat } from './ai';
 export function activate(_status?: 'onStartupFinished', _arg?: string): void {}
 
 function showDialog(msg: string) {

@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AI 设置</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;padding:20px;background:#f5f5f5;color:#333}
+h2{font-size:16px;margin-bottom:16px;color:#1a1a1a}
+label{display:block;font-size:13px;font-weight:600;margin:12px 0 4px;color:#555}
+input,textarea,select{width:100%;padding:8px 10px;border:1px solid #d1d5db;border-radius:6px;font-size:13px;font-family:inherit}
+input:focus,textarea:focus,select:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.15)}
+textarea{resize:vertical;min-height:60px}
+.row{display:flex;gap:8px}
+.row>div{flex:1}
+.actions{margin-top:18px;display:flex;gap:8px}
+button{padding:8px 16px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:background .15s}
+.btn-primary{background:#2563eb;color:#fff}
+.btn-primary:hover{background:#1d4ed8}
+.btn-secondary{background:#e5e7eb;color:#374151}
+.btn-secondary:hover{background:#d1d5db}
+.btn-danger{background:#fee2e2;color:#dc2626}
+.btn-danger:hover{background:#fecaca}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);
+  padding:8px 16px;border-radius:6px;font-size:13px;font-weight:600;z-index:99;
+  opacity:0;transition:opacity .3s}
+.toast.show{opacity:1}
+.toast-success{background:#dcfce7;color:#166534}
+.toast-error{background:#fee2e2;color:#dc2626}
+.pw-hint{font-size:11px;color:#9ca3af;margin-top:2px}
+</style>
+</head>
+<body>
+<h2>🤖 AI 分析设置</h2>
+
+<label>API 地址</label>
+<input id="endpoint" placeholder="https://api.openai.com/v1">
+
+<label>API Key</label>
+<input id="key" type="password" placeholder="sk-...">
+<div class="pw-hint">密钥仅存储在本地扩展中，不会上传到任何第三方</div>
+
+<label>模型名称</label>
+<input id="model" placeholder="gpt-4o-mini">
+
+<label>系统提示词</label>
+<textarea id="sysPrompt" placeholder="你是一个电子电路设计专家..."></textarea>
+
+<div class="actions">
+    <button class="btn-primary" onclick="doSave()">💾 保存</button>
+    <button class="btn-secondary" onclick="doReset()">🔄 恢复默认</button>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+var STORAGE_KEY = '__ai_config';
+var defaults = {
+    endpoint: 'https://api.openai.com/v1',
+    key: '',
+    model: 'gpt-4o-mini',
+    systemPrompt: '你是一个资深的电子电路设计专家。用户会提供原理图的网表数据（包含元件位号和引脚网络连接关系），请根据网表分析电路的功能、结构和工作原理。用中文回答。'
+};
+
+function waitForEda(cb, retry) {
+    if (typeof eda !== 'undefined' && eda.sys_Storage) { cb(); return; }
+    if (retry >= 20) { showToast('EDA API 不可用', 'error'); return; }
+    setTimeout(function () { waitForEda(cb, (retry || 0) + 1); }, 200);
+}
+
+function showToast(msg, type) {
+    var t = document.getElementById('toast');
+    t.textContent = msg;
+    t.className = 'toast toast-' + (type || 'success') + ' show';
+    setTimeout(function () { t.className = 'toast'; }, 2000);
+}
+
+function loadCfg() {
+    var cfg = defaults;
+    try {
+        var raw = eda.sys_Storage.getExtensionUserConfig(STORAGE_KEY);
+        if (raw) { var parsed = JSON.parse(raw); cfg = parsed; }
+    } catch (_) {}
+    document.getElementById('endpoint').value = cfg.endpoint || defaults.endpoint;
+    document.getElementById('key').value = cfg.key || '';
+    document.getElementById('model').value = cfg.model || defaults.model;
+    document.getElementById('sysPrompt').value = cfg.systemPrompt || defaults.systemPrompt;
+}
+
+function doSave() {
+    var cfg = {
+        endpoint: document.getElementById('endpoint').value.trim(),
+        key: document.getElementById('key').value.trim(),
+        model: document.getElementById('model').value.trim(),
+        systemPrompt: document.getElementById('sysPrompt').value.trim()
+    };
+    try { eda.sys_Storage.setExtensionUserConfig(STORAGE_KEY, JSON.stringify(cfg)); } catch (_) {}
+    showToast('配置已保存 ✅');
+}
+
+function doReset() {
+    document.getElementById('endpoint').value = defaults.endpoint;
+    document.getElementById('key').value = defaults.key;
+    document.getElementById('model').value = defaults.model;
+    document.getElementById('sysPrompt').value = defaults.systemPrompt;
+    try { eda.sys_Storage.setExtensionUserConfig(STORAGE_KEY, JSON.stringify(defaults)); } catch (_) {}
+    showToast('已恢复默认配置');
+}
+
+waitForEda(loadCfg);
+</script>
+</body>
+</html>

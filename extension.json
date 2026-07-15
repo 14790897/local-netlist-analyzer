@@ -33,6 +33,16 @@
 						"id": "analyze-selection",
 						"title": "分析选中区域网表",
 						"registerFn": "analyzeSelection"
+					},
+					{
+						"id": "ai-settings",
+						"title": "AI 设置",
+						"registerFn": "openSettings"
+					},
+					{
+						"id": "ai-chat",
+						"title": "AI 对话",
+						"registerFn": "openAIChat"
 					}
 				]
 			}
@@ -46,6 +56,16 @@
 						"id": "analyze-selection",
 						"title": "分析选中区域网表",
 						"registerFn": "analyzeSelection"
+					},
+					{
+						"id": "ai-settings",
+						"title": "AI 设置",
+						"registerFn": "openSettings"
+					},
+					{
+						"id": "ai-chat",
+						"title": "AI 对话",
+						"registerFn": "openAIChat"
 					}
 				]
 			}

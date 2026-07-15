@@ -1,0 +1,331 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>AI 电路分析</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  display:flex;flex-direction:column;height:100vh;background:#f8f9fa}
+.header{background:#fff;border-bottom:1px solid #e5e7eb;padding:10px 16px;
+  display:flex;align-items:center;gap:10px;flex-shrink:0}
+.header h2{font-size:15px;font-weight:600;color:#1a1a1a;flex:1}
+.header .badge{font-size:11px;padding:2px 8px;border-radius:10px;background:#dbeafe;color:#1e40af}
+.chat-area{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:12px}
+.msg{max-width:85%;padding:10px 14px;border-radius:12px;font-size:13px;line-height:1.7;word-wrap:break-word}
+.msg-user{align-self:flex-end;background:#2563eb;color:#fff;border-bottom-right-radius:4px}
+.msg-ai{align-self:flex-start;background:#fff;border:1px solid #e5e7eb;color:#333;border-bottom-left-radius:4px}
+.msg-ai h1,.msg-ai h2,.msg-ai h3{font-size:14px;margin:8px 0 4px}
+.msg-ai code{background:#f1f5f9;padding:1px 4px;border-radius:3px;font-size:12px}
+.msg-ai pre{background:#1e293b;color:#e2e8f0;padding:10px;border-radius:6px;
+  font-size:12px;overflow-x:auto;margin:6px 0}
+.msg-ai pre code{background:none;padding:0;color:inherit}
+.msg-ai ul,.msg-ai ol{padding-left:18px;margin:4px 0}
+.msg-ai table{border-collapse:collapse;font-size:12px;margin:6px 0;width:100%}
+.msg-ai th,.msg-ai td{border:1px solid #d1d5db;padding:4px 8px;text-align:left}
+.msg-ai th{background:#f1f5f9;font-weight:600}
+.msg-ai blockquote{border-left:3px solid #d1d5db;padding-left:10px;color:#6b7280;margin:4px 0}
+.msg-ai strong{font-weight:700}
+.msg-ai em{font-style:italic}
+.msg-sys{align-self:center;font-size:12px;color:#9ca3af;text-align:center;max-width:95%}
+.typing{align-self:flex-start;padding:10px 14px;font-size:13px;color:#6b7280}
+.typing span{animation:blink 1.4s infinite}
+.typing span:nth-child(2){animation-delay:.2s}
+.typing span:nth-child(3){animation-delay:.4s}
+@keyframes blink{0%,60%,100%{opacity:0}30%{opacity:1}}
+.input-area{background:#fff;border-top:1px solid #e5e7eb;padding:10px 16px;flex-shrink:0}
+.input-row{display:flex;gap:8px}
+.input-row textarea{flex:1;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;
+  font-size:13px;font-family:inherit;resize:none;min-height:38px;max-height:120px;
+  line-height:1.5}
+.input-row textarea:focus{outline:none;border-color:#2563eb;box-shadow:0 0 0 2px rgba(37,99,235,.15)}
+.input-row button{padding:8px 14px;background:#2563eb;color:#fff;border:none;
+  border-radius:8px;font-size:13px;font-weight:600;cursor:pointer;white-space:nowrap}
+.input-row button:hover{background:#1d4ed8}
+.input-row button:disabled{background:#9ca3af;cursor:not-allowed}
+.error-msg{background:#fee2e2;color:#dc2626;padding:10px 14px;margin:8px;border-radius:8px;font-size:12px}
+</style>
+</head>
+<body>
+<div class="header">
+    <h2>🤖 AI 电路分析</h2>
+    <span class="badge" id="modelBadge">加载中...</span>
+</div>
+
+<div class="chat-area" id="chatArea">
+    <div class="msg msg-sys">正在加载网表数据...</div>
+</div>
+
+<div class="input-area">
+    <div class="input-row">
+        <textarea id="userInput" placeholder="输入问题，例如：分析这个电路的电源部分..." rows="1"
+            onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();doSend();}"></textarea>
+        <button id="sendBtn" onclick="doSend()">发送</button>
+    </div>
+</div>
+
+<script>
+var CONFIG_KEY = '__ai_config';
+var DATA_KEY = '__nl_data';
+var chatArea = document.getElementById('chatArea');
+var userInput = document.getElementById('userInput');
+var sendBtn = document.getElementById('sendBtn');
+var cfg = null;
+var nlData = null;
+var history = [];
+var isSending = false;
+
+// --- EDA ready wait ---
+function waitForEda(cb, retry) {
+    if (typeof eda !== 'undefined' && eda.sys_Storage) { cb(); return; }
+    if (retry >= 25) {
+        addSystemMsg('⚠️ EDA API 不可用，请关闭后重新打开。');
+        return;
+    }
+    setTimeout(function () { waitForEda(cb, (retry || 0) + 1); }, 250);
+}
+
+// --- UI helpers ---
+function addSystemMsg(text) {
+    var d = document.createElement('div');
+    d.className = 'msg msg-sys'; d.textContent = text;
+    chatArea.appendChild(d);
+    scrollBottom();
+}
+
+function addMsg(role, content) {
+    var d = document.createElement('div');
+    d.className = 'msg msg-' + (role === 'user' ? 'user' : 'ai');
+    if (role === 'assistant') {
+        d.innerHTML = renderMarkdown(content);
+    } else {
+        d.textContent = content;
+    }
+    chatArea.appendChild(d);
+    scrollBottom();
+}
+
+function showTyping() {
+    var d = document.createElement('div');
+    d.className = 'typing'; d.id = 'typingIndicator';
+    d.innerHTML = 'AI 思考中<span>.</span><span>.</span><span>.</span>';
+    chatArea.appendChild(d);
+    scrollBottom();
+}
+
+function hideTyping() {
+    var el = document.getElementById('typingIndicator');
+    if (el) el.remove();
+}
+
+function showError(msg) {
+    var d = document.createElement('div');
+    d.className = 'error-msg'; d.textContent = msg;
+    chatArea.appendChild(d);
+    scrollBottom();
+}
+
+function scrollBottom() {
+    chatArea.scrollTop = chatArea.scrollHeight;
+}
+
+// --- Simple Markdown renderer ---
+function renderMarkdown(text) {
+    // Escape HTML first
+    var esc = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    // Code blocks
+    esc = esc.replace(/```(\w*)\n([\s\S]*?)```/g, function(_, lang, code) {
+        return '<pre><code>' + code.trim() + '</code></pre>';
+    });
+    // Inline code
+    esc = esc.replace(/`([^`]+)`/g, '<code>$1</code>');
+    // Bold
+    esc = esc.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+    // Italic
+    esc = esc.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+    // Headers (after code blocks)
+    esc = esc.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+    esc = esc.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+    esc = esc.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+    // Blockquotes
+    esc = esc.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+    // Unordered lists
+    esc = esc.replace(/^[\-\*] (.+)$/gm, '<li>$1</li>');
+    esc = esc.replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>');
+    // Ordered lists
+    esc = esc.replace(/^\d+\. (.+)$/gm, '<li>$1</li>');
+    // Tables
+    esc = esc.replace(/\|([^\|]+)\|/g, function(m, content) {
+        var cells = content.split('|').map(function(c) { return c.trim(); });
+        // Skip separator rows
+        if (cells.every(function(c) { return /^[-:]+$/.test(c); })) return '';
+        var isHeader = !esc.includes('<tr>');
+        return '<tr>' + cells.map(function(c) {
+            return (isHeader ? '<th>' : '<td>') + c + (isHeader ? '</th>' : '</td>');
+        }).join('') + '</tr>';
+    });
+    // Double newlines to paragraphs
+    esc = esc.replace(/\n\n/g, '</p><p>');
+    return '<p>' + esc + '</p>';
+}
+
+// --- Config & Data loading ---
+function init() {
+    waitForEda(function () {
+        // Load config
+        cfg = {
+            endpoint: 'https://api.openai.com/v1',
+            key: '',
+            model: 'gpt-4o-mini',
+            systemPrompt: '你是一个资深的电子电路设计专家。'
+        };
+        try {
+            var raw = eda.sys_Storage.getExtensionUserConfig(CONFIG_KEY);
+            if (raw) {
+                var parsed = JSON.parse(raw);
+                cfg.endpoint = parsed.endpoint || cfg.endpoint;
+                cfg.key = parsed.key || cfg.key;
+                cfg.model = parsed.model || cfg.model;
+                cfg.systemPrompt = parsed.systemPrompt || cfg.systemPrompt;
+            }
+        } catch (_) {}
+        document.getElementById('modelBadge').textContent = cfg.model || '未配置';
+
+        // Load netlist
+        nlData = null;
+        try {
+            var raw2 = eda.sys_Storage.getExtensionUserConfig(DATA_KEY);
+            if (raw2) {
+                var parsed2 = JSON.parse(raw2);
+                if (parsed2.nets && Object.keys(parsed2.nets).length > 0) {
+                    nlData = parsed2;
+                }
+            }
+            // Fallback: try localStorage (from main extension)
+            if (!nlData) {
+                var d = localStorage.getItem('__nl_data');
+                if (d) nlData = JSON.parse(d);
+            }
+        } catch (_) {}
+
+        // Clear loading
+        chatArea.innerHTML = '';
+
+        if (!cfg.key) {
+            showError('⚠️ 未配置 API Key。请先在「AI 设置」中配置后再使用。');
+            return;
+        }
+
+        if (!nlData) {
+            showError('⚠️ 未找到网表数据。请先在原理图中框选元件后执行「分析选中区域网表」。');
+            addSystemMsg('提示：执行网表分析后，点击「AI 对话」即可基于分析结果提问。');
+            return;
+        }
+
+        // Show netlist summary
+        var netKeys = Object.keys(nlData.nets);
+        var summary = '已加载网表: ' + nlData.comps + ' 个元件, ' + (nlData.netCount || netKeys.length) + ' 个网络';
+        addSystemMsg(summary);
+
+        // Build system context
+        var ctx = cfg.systemPrompt + '\n\n--- 网表数据 ---\n';
+        ctx += '元件数: ' + (nlData.comps || '?') + ', 网络数: ' + (nlData.netCount || netKeys.length) + '\n\n';
+        for (var i = 0; i < netKeys.length; i++) {
+            var net = netKeys[i];
+            var entries = nlData.nets[net];
+            ctx += net + ': ' + (entries || []).join(', ') + '\n';
+        }
+        ctx += '\n请根据以上网表数据回答用户问题。';
+
+        // Init system message
+        history = [{ role: 'system', content: ctx }];
+
+        addSystemMsg('💡 可以开始提问了。例如：这个电路的主要功能是什么？电源部分有哪些元件？');
+        userInput.focus();
+    });
+}
+
+// --- Send message ---
+async function doSend() {
+    if (isSending) return;
+    var text = userInput.value.trim();
+    if (!text) return;
+    if (!cfg || !cfg.key) {
+        showError('请先配置 API Key');
+        return;
+    }
+
+    userInput.value = '';
+    userInput.style.height = 'auto';
+    sendBtn.disabled = true;
+    isSending = true;
+
+    addMsg('user', text);
+    history.push({ role: 'user', content: text });
+    showTyping();
+
+    try {
+        var endpoint = (cfg.endpoint || 'https://api.openai.com/v1').replace(/\/+$/, '');
+        if (!endpoint.includes('/chat/completions')) endpoint += '/chat/completions';
+
+        var resp = await fetch(endpoint, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + cfg.key
+            },
+            body: JSON.stringify({
+                model: cfg.model || 'gpt-4o-mini',
+                messages: history,
+                temperature: 0.7,
+                max_tokens: 4096
+            })
+        });
+
+        if (!resp.ok) {
+            var errText = '';
+            try { errText = await resp.text(); } catch (_) {}
+            throw new Error('HTTP ' + resp.status + (errText ? ': ' + errText.substring(0, 200) : ''));
+        }
+
+        var data = await resp.json();
+        var reply = '';
+        if (data.choices && data.choices[0] && data.choices[0].message) {
+            reply = data.choices[0].message.content || '';
+        } else if (data.content) {
+            reply = data.content;
+        } else {
+            reply = JSON.stringify(data);
+        }
+
+        hideTyping();
+        if (reply) {
+            addMsg('assistant', reply);
+            history.push({ role: 'assistant', content: reply });
+        } else {
+            showError('AI 返回了空响应');
+        }
+    } catch (e) {
+        hideTyping();
+        showError('请求失败: ' + (e.message || String(e)));
+        // Remove the last user message from history on error
+        history.pop();
+    }
+
+    sendBtn.disabled = false;
+    isSending = false;
+    userInput.focus();
+}
+
+// Auto-resize textarea
+userInput.addEventListener('input', function () {
+    this.style.height = 'auto';
+    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+});
+
+// Init on load
+init();
+</script>
+</body>
+</html>
