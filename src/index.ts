@@ -134,39 +134,30 @@ export async function analyzeSelection(): Promise<void> {
             } catch (_) {}
         }
 
-        // Step 3: Show dialog + offer CSV export
-        var neta = Object.keys(nets);
+        // Step 3: Save first, then show dialog
+        var neta = Object.keys(nets).sort();
         var summary = ids.length + '选中 ' + comps.size + '元件 ' + neta.length + '网络';
 
-        // Build CSV and offer download
+        // Build CSV
         var csv = 'Net,Designator,Pin\n';
-        var shown: string[] = [];
         for (var ni = 0; ni < neta.length; ni++) {
-            var entries = nets[neta[ni]];
-            for (var ei = 0; ei < entries.length; ei++) {
-                var parts = entries[ei].split('-');
-                csv += '"' + neta[ni] + '","' + parts[0] + '","' + (parts[1] || '') + '"\n';
-                if (shown.length < 5) shown.push(neta[ni] + ':' + entries[ei]);
-            }
+            var ents = nets[neta[ni]];
+            for (var ei = 0; ei < ents.length; ei++) csv += neta[ni] + ',' + ents[ei] + '\n';
         }
 
-        // Save CSV
-        try {
-            var blob = new Blob([csv], { type: 'text/csv' });
-            await eda.sys_FileSystem.saveFile(blob, 'local-netlist.csv');
-        } catch (_) {}
+        // Save files BEFORE dialog (dialog is modal)
+        try { await eda.sys_FileSystem.saveFile(new Blob([csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
+        if (nl) { try { await eda.sys_FileSystem.saveFile(new Blob([nl], { type: 'application/json' }), 'netlist-raw.json'); } catch(_2) {} }
 
-        // Show compact summary
-        var detail = shown.length > 0 ? ' | ' + shown.join(' ') : '';
-        showDialog(summary + detail);
+        // Also store via sys_Storage for IFrame
+        try { eda.sys_Storage.setExtensionUserConfig('__nl_data', JSON.stringify({nets:nets,comps:comps.size,netCount:neta.length})); } catch (_) {}
 
-        // Also save raw netlist
-        if (nl) {
-            try {
-                var rawBlob = new Blob([nl], { type: 'application/json' });
-                await eda.sys_FileSystem.saveFile(rawBlob, 'netlist-raw.json');
-            } catch(_2) {}
+        // Show summary with first few nets
+        var detail: string[] = [];
+        for (var dn = 0; dn < Math.min(6, neta.length); dn++) {
+            detail.push(neta[dn] + '(' + nets[neta[dn]].length + 'pin)');
         }
+        showDialog(summary + (detail.length > 0 ? ' | ' + detail.join(' ') : ''));
     } catch (e) {
         showDialog('分析出错: ' + (e && (e as any).message || String(e)));
     }
