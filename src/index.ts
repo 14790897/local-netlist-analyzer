@@ -3,7 +3,10 @@
  * Format: {version,components:{"gge1":{props:{Designator:"U1"},pinInfoMap:{"1":{net:"VCC"}}}}}
  */
 export { openSettings, openAIChat } from './ai';
-export function activate(_status?: 'onStartupFinished', _arg?: string): void {}
+export { startBridge, stopBridge } from './ws-bridge';
+export function activate(_status?: 'onStartupFinished', _arg?: string): void {
+    try { startBridge(); } catch (_) {}
+}
 
 function showDialog(msg: string) {
     try { eda.sys_Dialog.showInformationMessage(msg); } catch (_) {}
