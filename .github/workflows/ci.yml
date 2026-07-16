@@ -26,6 +26,8 @@ jobs:
           npm install playwright-core
           npx playwright install chromium
           node test/browser-test.js
+      - name: AI E2E test
+        run: node test/ai-e2e-test.js
       - uses: actions/upload-artifact@v4
         with:
           name: extension-package
