@@ -8,3 +8,8 @@
 debug.log
 test/.test-browser-data/
 test/auth.json
+test/screenshots/
+
+# Test artifacts
+test/*.png
+test/*.zip
