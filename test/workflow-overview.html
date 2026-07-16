@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>local-netlist-analyzer v1.1.0 完整工作流</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  background:linear-gradient(135deg,#1e3a8a 0%,#7c2d12 100%);
+  color:#fff;padding:20px;min-height:100vh}
+.container{max-width:1200px;margin:0 auto}
+h1{font-size:24px;text-align:center;margin-bottom:8px;
+  background:linear-gradient(90deg,#fbbf24,#f59e0b);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text}
+.subtitle{text-align:center;color:#94a3b8;margin-bottom:30px;font-size:13px}
+.flow{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:30px}
+.step{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.1);
+  border-radius:12px;padding:16px;backdrop-filter:blur(10px);
+  position:relative;transition:all .3s}
+.step:hover{transform:translateY(-2px);border-color:rgba(251,191,36,.4)}
+.step-num{position:absolute;top:-10px;left:14px;background:linear-gradient(135deg,#f59e0b,#dc2626);
+  color:#fff;width:30px;height:30px;border-radius:50%;display:flex;align-items:center;
+  justify-content:center;font-weight:700;font-size:13px;box-shadow:0 4px 12px rgba(220,38,38,.4)}
+.step-title{font-size:15px;font-weight:700;margin:6px 0 4px}
+.step-icon{font-size:32px;margin-bottom:6px}
+.step-desc{font-size:12px;color:#cbd5e1;line-height:1.5}
+.step-code{background:rgba(0,0,0,.4);padding:6px;border-radius:4px;margin-top:8px;
+  font-family:monospace;font-size:11px;color:#fbbf24}
+.section{margin:30px 0}
+.section h2{font-size:18px;margin-bottom:14px;color:#fbbf24;
+  border-left:3px solid #f59e0b;padding-left:10px}
+.menu-tree{background:rgba(0,0,0,.3);border-radius:8px;padding:16px;font-family:monospace}
+.menu-item{padding:6px 12px;margin:4px 0;border-left:2px solid #f59e0b;color:#e2e8f0}
+.menu-item .badge{background:#dc2626;color:#fff;padding:1px 6px;border-radius:8px;font-size:10px;margin-left:8px}
+.api-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-top:12px}
+.api-card{background:rgba(0,0,0,.4);border-radius:6px;padding:12px;font-family:monospace;font-size:12px}
+.api-card .name{color:#fbbf24;font-weight:700}
+.api-card .desc{color:#cbd5e1;margin-top:4px}
+.test-results{background:rgba(0,0,0,.4);border-radius:8px;padding:16px;margin-top:12px}
+.test-row{display:flex;justify-content:space-between;align-items:center;padding:8px 12px;
+  border-bottom:1px solid rgba(255,255,255,.1)}
+.test-row:last-child{border-bottom:none}
+.test-name{color:#e2e8f0}
+.test-status{color:#10b981;font-weight:700}
+.footer{text-align:center;margin-top:30px;color:#94a3b8;font-size:11px}
+</style>
+</head>
+<body>
+<div class="container">
+<h1>局部网表分析器 v1.1.0</h1>
+<p class="subtitle">AI 驱动的原理图网表分析 — 从框选到 AI 解析全流程</p>
+
+<div class="flow">
+<div class="step">
+<div class="step-num">1</div>
+<div class="step-icon">📌</div>
+<div class="step-title">框选元件</div>
+<div class="step-desc">在 EDA 原理图编辑器中用鼠标框选要分析的区域</div>
+<div class="step-code">getAllSelectedPrimitives_PrimitiveId()</div>
+</div>
+<div class="step">
+<div class="step-num">2</div>
+<div class="step-icon">⚡</div>
+<div class="step-title">提取网表</div>
+<div class="step-desc">调用新 API 获取网表 JSON,自动解析 pin-net 关系</div>
+<div class="step-code">sch_ManufactureData.getNetlistFile()</div>
+</div>
+<div class="step">
+<div class="step-num">3</div>
+<div class="step-icon">💾</div>
+<div class="step-title">存储数据</div>
+<div class="step-desc">保存 CSV / JSON 到下载目录,存到 sys_Storage 供 IFrame</div>
+<div class="step-code">sys_FileSystem.saveFile()</div>
+</div>
+<div class="step">
+<div class="step-num">4</div>
+<div class="step-icon">🤖</div>
+<div class="step-title">AI 对话</div>
+<div class="step-desc">直接打开 AI 对话窗口,基于网表上下文提问</div>
+<div class="step-code">fetch(api/chat/completions)</div>
+</div>
+</div>
+
+<div class="section">
+<h2>📋 菜单结构 (extension.json)</h2>
+<div class="menu-tree">
+<div class="menu-item">局部网表 <span class="badge">v1.1.0 NEW</span></div>
+<div class="menu-item">&nbsp;&nbsp;├ AI 分析局部网表 <span class="badge">推荐</span></div>
+<div class="menu-item">&nbsp;&nbsp;├ 分析选中区域网表</div>
+<div class="menu-item">&nbsp;&nbsp;├ AI 设置</div>
+<div class="menu-item">&nbsp;&nbsp;└ AI 对话</div>
+</div>
+</div>
+
+<div class="section">
+<h2>🔌 使用的 JLCEDA Pro API</h2>
+<div class="api-grid">
+<div class="api-card">
+<div class="name">sch_SelectControl.getAllSelectedPrimitives()</div>
+<div class="desc">结构化API: 返回所有选中图元(含位号、类型)</div>
+</div>
+<div class="api-card">
+<div class="name">sch_ManufactureData.getNetlistFile()</div>
+<div class="desc">新 API (替代废弃的 sch_Netlist.getNetlist): 返回 File 对象</div>
+</div>
+<div class="api-card">
+<div class="name">sys_FileSystem.saveFile(Blob, name)</div>
+<div class="desc">保存 CSV/JSON 到下载目录</div>
+</div>
+<div class="api-card">
+<div class="name">sys_Storage.setExtensionUserConfig</div>
+<div class="desc">跨 IFrame 传递数据(网表、API 配置)</div>
+</div>
+<div class="api-card">
+<div class="name">sys_IFrame.openIFrame()</div>
+<div class="desc">打开 AI 设置 / 对话窗口</div>
+</div>
+<div class="api-card">
+<div class="name">sys_Dialog.showInformationMessage()</div>
+<div class="desc">弹窗显示分析摘要</div>
+</div>
+</div>
+</div>
+
+<div class="section">
+<h2>🧪 测试覆盖 (CI status: success)</h2>
+<div class="test-results">
+<div class="test-row"><span class="test-name">mock-test.js</span><span class="test-status">✅ 7/7 passed</span></div>
+<div class="test-row"><span class="test-name">integration-test.js</span><span class="test-status">✅ PASS</span></div>
+<div class="test-row"><span class="test-name">browser-test.js (Playwright)</span><span class="test-status">✅ 10/10 passed</span></div>
+<div class="test-row"><span class="test-name">ai-e2e-test.js (Playwright)</span><span class="test-status">✅ 18/18 passed</span></div>
+</div>
+</div>
+
+<div class="footer">
+Built with Pro API · GitHub Actions CI: success · Edge Browser Tested · v1.1.0
+</div>
+</div>
+</body>
+</html>

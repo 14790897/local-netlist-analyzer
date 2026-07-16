@@ -269,6 +269,10 @@ async function doSend() {
         var endpoint = (cfg.endpoint || 'https://api.openai.com/v1').replace(/\/+$/, '');
         if (!endpoint.includes('/chat/completions')) endpoint += '/chat/completions';
 
+        // Add timeout wrapper to avoid hanging forever
+        var controller = new AbortController();
+        var timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+
         var resp = await fetch(endpoint, {
             method: 'POST',
             headers: {
@@ -277,11 +281,13 @@ async function doSend() {
             },
             body: JSON.stringify({
                 model: cfg.model || 'gpt-4o-mini',
-                messages: history,
+                messages: history.slice(-4), // Limit to last 4 messages
                 temperature: 0.7,
-                max_tokens: 4096
-            })
+                max_tokens: 1024
+            }),
+            signal: controller.signal
         });
+        clearTimeout(timeoutId);
 
         if (!resp.ok) {
             var errText = '';
@@ -308,14 +314,16 @@ async function doSend() {
         }
     } catch (e) {
         hideTyping();
-        showError('请求失败: ' + (e.message || String(e)));
+        var errMsg = e.name === 'AbortError' ? '请求超时(60s),请检查网络或 API 配置' : '请求失败: ' + (e.message || String(e));
+        showError(errMsg);
         // Remove the last user message from history on error
-        history.pop();
+        try { history.pop(); } catch (_) {}
+    } finally {
+        // Always reset state, even on timeout/error
+        sendBtn.disabled = false;
+        isSending = false;
+        try { userInput.focus(); } catch (_) {}
     }
-
-    sendBtn.disabled = false;
-    isSending = false;
-    userInput.focus();
 }
 
 // Auto-resize textarea
