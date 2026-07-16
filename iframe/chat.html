@@ -283,7 +283,7 @@ async function doSend() {
                 model: cfg.model || 'gpt-4o-mini',
                 messages: history.slice(-4), // Limit to last 4 messages
                 temperature: 0.7,
-                max_tokens: 1024
+                max_tokens: 4000  // Allow longer responses (deepseek-v4-pro uses reasoning tokens)
             }),
             signal: controller.signal
         });
