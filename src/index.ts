@@ -48,10 +48,11 @@ function parseV2Netlist(raw: string): { nets: Record<string, string[]>; comps: S
             var c = components[keys[i]];
             if (!c || typeof c !== 'object') continue;
 
-            // Get designator
-            var desig = (c.props && c.props.Designator) || c.designator || c.Designator || keys[i];
-            if (!desig || desig.length > 20 || !/^[A-Za-z]+\d+/.test(desig)) continue;
-            comps.add(desig);
+        // Get designator — filter out anything that doesn't look like a real refdes
+        // (e.g. pastes, queries, notes). Must match strict Aa1+ pattern, <= 10 chars.
+        var desig = (c.props && c.props.Designator) || c.designator || c.Designator || keys[i];
+        if (!desig || desig.length > 10 || !/^[A-Za-z][A-Za-z0-9_]*\d+$/.test(desig)) continue;
+        comps.add(desig);
 
             // Parse pinInfoMap for net connections
             var pim = c.pinInfoMap || c.pins || c.pinMap || {};
@@ -186,8 +187,9 @@ async function doAnalyze(): Promise<AnalysisResult> {
                 var c = components[ckeys[k]];
                 if (!c || typeof c !== 'object') continue;
                 var desig = (c.props && c.props.Designator) || '';
+                // Filter non-refdes: pastes, notes, query strings etc.
+                if (!desig || desig.length > 10 || !/^[A-Za-z][A-Za-z0-9_]*\d+$/.test(desig)) continue;
                 if (selectedDesigs.size > 0 && !selectedDesigs.has(desig)) continue;
-                if (!desig) continue;
                 comps.add(desig);
                 var pim = c.pinInfoMap || c.pins || c.pinMap || {};
                 var pnKeys = Object.keys(pim);
