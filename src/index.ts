@@ -97,7 +97,7 @@ export async function analyzeSelection(): Promise<void> {
     }
 }
 
-/** Unified AI analysis — extract netlist then directly open AI chat */
+/** Unified AI analysis — extract netlist then directly open AI chat with a preset prompt */
 export async function aiAnalyzeSelection(): Promise<void> {
     try {
         var r = await doAnalyze();
@@ -119,6 +119,19 @@ export async function aiAnalyzeSelection(): Promise<void> {
             return;
         }
 
+        // Build preset prompt — explain what the netlist is, then ask for a structured analysis.
+        // The chat IFrame will pick this up via __ai_prefill and auto-send it.
+        var nets = Object.keys(r.nets);
+        var preset =
+            '请基于以下原理图局部网表（已框选 ' + r.comps.size + ' 个元件、' + r.neta.length + ' 个网络），' +
+            '用中文给出结构化分析。覆盖以下要点：\n' +
+            '1) 这部分电路的主要功能（1-2 句话）\n' +
+            '2) 涉及的电源轨（VCC/GND/特殊电压）\n' +
+            '3) 关键信号路径（输入→处理→输出）\n' +
+            '4) 元件分工：U 系列负责什么、R/C/Q/L/LED 各起什么作用\n' +
+            '5) 任何值得注意的设计要点或潜在问题';
+        try { eda.sys_Storage.setExtensionUserConfig('__ai_prefill', preset); } catch (_) {}
+
         // Open chat directly
         try {
             eda.sys_IFrame.openIFrame('/iframe/chat.html', 700, 560, 'ai-chat', {
@@ -129,7 +142,7 @@ export async function aiAnalyzeSelection(): Promise<void> {
             showDialog(r.summary + ' — IFrame 打开失败，请手动点击 AI 对话');
         }
     } catch (e) {
-        showDialog('分析出错: ' + (e && (e as any).message || String(e)));
+        showDialog('分析出错: ' + (e && (e && (e as any).message || String(e))));
     }
 }
 

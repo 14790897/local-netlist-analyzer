@@ -98,13 +98,37 @@ function addSystemMsg(text) {
 function addMsg(role, content) {
     var d = document.createElement('div');
     d.className = 'msg msg-' + (role === 'user' ? 'user' : 'ai');
-    if (role === 'assistant') {
-        d.innerHTML = renderMarkdown(content);
-    } else {
+    if (role === 'user') {
         d.textContent = content;
+        chatArea.appendChild(d);
+        scrollBottom();
+    } else {
+        chatArea.appendChild(d);
+        scrollBottom();
+        typewriteInto(d, content, 14);
     }
-    chatArea.appendChild(d);
-    scrollBottom();
+}
+
+// Typewriter: reveal plain text char-by-char (fast, no re-render cost).
+// When done, swap to fully-rendered markdown.
+function typewriteInto(el, fullText, msPerChar) {
+    msPerChar = msPerChar || 14;
+    var idx = 0;
+    el.textContent = '';
+    function tick() {
+        if (idx >= fullText.length) {
+            el.innerHTML = renderMarkdown(fullText);
+            if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+            return;
+        }
+        // Reveal 1-3 chars per tick; CJK reads better at 1 char/tick
+        var step = /[\u4e00-\u9fa5]/.test(fullText.charAt(idx)) ? 1 : 2;
+        idx = Math.min(idx + step, fullText.length);
+        el.textContent = fullText.substring(0, idx);
+        if (chatArea) chatArea.scrollTop = chatArea.scrollHeight;
+        setTimeout(tick, msPerChar);
+    }
+    tick();
 }
 
 function showTyping() {
@@ -244,6 +268,23 @@ function init() {
 
         addSystemMsg('💡 可以开始提问了。例如：这个电路的主要功能是什么？电源部分有哪些元件？');
         userInput.focus();
+
+        // Auto-prefill: if the host set __ai_prefill (e.g. via aiAnalyzeSelection),
+        // fill the textarea and auto-send it so the user doesn't have to type.
+        try {
+            var prefill = eda.sys_Storage.getExtensionUserConfig('__ai_prefill');
+            if (prefill) {
+                // Clear it so re-opening the chat manually doesn't repeat the auto-send.
+                try { eda.sys_Storage.setExtensionUserConfig('__ai_prefill', ''); } catch (_) {}
+                userInput.value = prefill;
+                // Trigger a synthetic input event so the resize logic runs
+                userInput.dispatchEvent(new Event('input', { bubbles: true }));
+                // Kick off the send after a short delay so the UI updates
+                setTimeout(function () {
+                    if (!isSending) doSend();
+                }, 200);
+            }
+        } catch (_) {}
     });
 }
 
