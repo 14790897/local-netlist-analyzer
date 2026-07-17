@@ -34,6 +34,18 @@ body{font:14px/1.6 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
 .typing span:nth-child(2){animation-delay:.2s}
 .typing span:nth-child(3){animation-delay:.4s}
 @keyframes blink{0%,60%,100%{opacity:0}30%{opacity:1}}
+.reasoning{margin:6px 0 8px;align-self:flex-start;max-width:92%;
+  background:#f8fafc;border:1px solid #e2e8f0;border-radius:8px;padding:0;overflow:hidden}
+.reasoning summary{padding:8px 12px;cursor:pointer;font-size:12px;color:#64748b;
+  list-style:none;user-select:none;display:flex;align-items:center;gap:6px}
+.reasoning summary::-webkit-details-marker{display:none}
+.reasoning summary::before{content:"💭";font-size:13px}
+.reasoning summary::after{content:"▾";margin-left:auto;transition:transform .2s}
+.reasoning:not([open]) summary::after{transform:rotate(-90deg)}
+.reasoning-body{padding:0 12px 10px;font-size:12px;line-height:1.65;color:#475569;
+  white-space:pre-wrap;word-wrap:break-word;max-height:300px;overflow-y:auto;
+  border-top:1px solid #e2e8f0;background:#f1f5f9}
+.reasoning-meta{padding:6px 12px 8px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;background:#f8fafc}
 .input-area{background:#fff;border-top:1px solid #e5e7eb;padding:10px 16px;flex-shrink:0}
 .input-row{display:flex;gap:8px}
 .input-row textarea{flex:1;padding:8px 10px;border:1px solid #d1d5db;border-radius:8px;
@@ -129,6 +141,29 @@ function typewriteInto(el, fullText, msPerChar) {
         setTimeout(tick, msPerChar);
     }
     tick();
+}
+
+// Render the model's thinking/reasoning trace above its reply.
+// Shown as a collapsible <details> so it doesn't bloat the chat unless
+// the user wants to inspect the chain of thought.
+function addReasoning(text) {
+    var d = document.createElement('details');
+    d.className = 'reasoning';
+    // Show longer traces (>200 chars) collapsed by default — they're usually long
+    d.open = text.length < 200;
+    var s = document.createElement('summary');
+    s.textContent = '思考过程';
+    var body = document.createElement('div');
+    body.className = 'reasoning-body';
+    body.textContent = text;
+    var meta = document.createElement('div');
+    meta.className = 'reasoning-meta';
+    meta.textContent = text.length + ' 字符';
+    d.appendChild(s);
+    d.appendChild(body);
+    d.appendChild(meta);
+    chatArea.appendChild(d);
+    scrollBottom();
 }
 
 function showTyping() {
@@ -339,8 +374,14 @@ async function doSend() {
 
         var data = await resp.json();
         var reply = '';
+        var reasoning = '';
         if (data.choices && data.choices[0] && data.choices[0].message) {
-            reply = data.choices[0].message.content || '';
+            var msg = data.choices[0].message;
+            reply = msg.content || '';
+            // deepseek-v4-pro and other reasoning models put their thinking
+            // in a separate field. Surface it to the user as a collapsible block
+            // so they can see WHY the AI gave that answer.
+            reasoning = msg.reasoning_content || '';
         } else if (data.content) {
             reply = data.content;
         } else {
@@ -348,6 +389,9 @@ async function doSend() {
         }
 
         hideTyping();
+        if (reasoning) {
+            addReasoning(reasoning);
+        }
         if (reply) {
             addMsg('assistant', reply);
             chatMessages.push({ role: 'assistant', content: reply });
