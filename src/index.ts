@@ -5,7 +5,73 @@
 export { openSettings, openAIChat } from './ai';
 export { startBridge, stopBridge } from './ws-bridge';
 export function activate(_status?: 'onStartupFinished', _arg?: string): void {
+    try { installV32Shim(); } catch (_) {}
     try { startBridge(); } catch (_) {}
+}
+
+// JLCEDA V3.2.148 moved the extension API from `window.eda` to
+// `window._EXTAPI_ROOT_`, and changed primitive shape from getter-based
+// (getState_Designator, getState_Net, …) to plain property access
+// (designator, net, primitiveType, …). Older v3.0/3.1 extensions
+// expecting `eda.*` and `p.getState_*` will silently fail in V3.2.
+//
+// This shim re-aliases `eda` to `_EXTAPI_ROOT_` and wraps each
+// primitive so the legacy getter API still works. We keep the shim
+// idempotent and silent if either side is missing, so v3.0 still runs.
+function installV32Shim(): void {
+    try {
+        var g: any = (typeof globalThis !== 'undefined' ? globalThis : window) as any;
+        var root: any = g._EXTAPI_ROOT_;
+        if (!root || g.__edaShimInstalled) return;
+        if (typeof g.eda !== 'undefined' && g.eda && g.eda !== root) {
+            // V3.0 path already active — nothing to shim
+            g.__edaShimInstalled = true;
+            return;
+        }
+        g.eda = root;
+        g.__edaShimInstalled = true;
+
+        // Wrap primitive arrays so legacy .getState_* getters return the
+        // matching plain field. We only patch the methods our code uses.
+        var proto: any = {
+            getState_PrimitiveType: function () { return this.primitiveType; },
+            getState_Designator:    function () { return this.designator; },
+            getState_Net:           function () { return this.net; },
+            getState_OwnerComponentDesignator: function () { return this.ownerComponentDesignator; },
+            getState_PinNumber:     function () { return this.number; },
+            getState_PrimitiveId:   function () { return this.primitiveId || this.id; },
+        };
+        var shimPrimitives = function (list: any): any {
+            if (!list || !Array.isArray(list)) return list;
+            for (var i = 0; i < list.length; i++) {
+                var p = list[i];
+                if (p && !p.__shimmed && typeof p === 'object') {
+                    for (var k in proto) {
+                        if (typeof p[k] === 'undefined' && typeof proto[k] === 'function') {
+                            try { p[k] = proto[k]; } catch (_) {}
+                        }
+                    }
+                    p.__shimmed = true;
+                }
+            }
+            return list;
+        };
+        // Hook the two selection methods that return primitives
+        if (root.sch_SelectControl) {
+            var sc = root.sch_SelectControl;
+            for (var m of ['getAllSelectedPrimitives', 'getSelectedPrimitives', 'getPrimitivesByPrimitiveId', 'getPrimitiveByPrimitiveId']) {
+                var orig = sc[m];
+                if (typeof orig === 'function' && !sc['__' + m]) {
+                    sc['__' + m] = orig;
+                    sc[m] = function () {
+                        var args = arguments;
+                        var p = orig.apply(sc, args);
+                        return shimPrimitives(p);
+                    };
+                }
+            }
+        }
+    } catch (_) {}
 }
 
 function showDialog(msg: string) {
