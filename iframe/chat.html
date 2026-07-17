@@ -73,7 +73,8 @@ var userInput = document.getElementById('userInput');
 var sendBtn = document.getElementById('sendBtn');
 var cfg = null;
 var nlData = null;
-var history = [];
+// Use chatMessages instead of `history` to avoid clobbering window.history (History API)
+var chatMessages = [];
 var isSending = false;
 
 // --- EDA ready wait ---
@@ -239,7 +240,7 @@ function init() {
         ctx += '\n请根据以上网表数据回答用户问题。';
 
         // Init system message
-        history = [{ role: 'system', content: ctx }];
+        chatMessages = [{ role: 'system', content: ctx }];
 
         addSystemMsg('💡 可以开始提问了。例如：这个电路的主要功能是什么？电源部分有哪些元件？');
         userInput.focus();
@@ -262,7 +263,7 @@ async function doSend() {
     isSending = true;
 
     addMsg('user', text);
-    history.push({ role: 'user', content: text });
+    chatMessages.push({ role: 'user', content: text });
     showTyping();
 
     try {
@@ -281,7 +282,7 @@ async function doSend() {
             },
             body: JSON.stringify({
                 model: cfg.model || 'gpt-4o-mini',
-                messages: history.slice(-4), // Limit to last 4 messages
+                messages: chatMessages.slice(-4), // Limit to last 4 messages
                 temperature: 0.7,
                 max_tokens: 4000  // Allow longer responses (deepseek-v4-pro uses reasoning tokens)
             }),
@@ -308,7 +309,7 @@ async function doSend() {
         hideTyping();
         if (reply) {
             addMsg('assistant', reply);
-            history.push({ role: 'assistant', content: reply });
+            chatMessages.push({ role: 'assistant', content: reply });
         } else {
             showError('AI 返回了空响应');
         }
@@ -316,8 +317,8 @@ async function doSend() {
         hideTyping();
         var errMsg = e.name === 'AbortError' ? '请求超时(60s),请检查网络或 API 配置' : '请求失败: ' + (e.message || String(e));
         showError(errMsg);
-        // Remove the last user message from history on error
-        try { history.pop(); } catch (_) {}
+        // Remove the last user message from chatMessages on error
+        try { chatMessages.pop(); } catch (_) {}
     } finally {
         // Always reset state, even on timeout/error
         sendBtn.disabled = false;

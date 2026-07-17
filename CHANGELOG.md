@@ -1,3 +1,9 @@
+# 1.2.1
+
+## 修复
+
+1. **AI 对话无回复**：`iframe/chat.html` 里的局部变量 `history` 覆盖了浏览器的 `window.history`（History API），导致 `history.push()` 抛 TypeError。doSend 走到用户消息入队时就崩溃，后面的 fetch 没发、按钮永远 disabled。改为 `chatMessages` 避免冲突。
+
 # 1.2.0
 
 ## 变更
