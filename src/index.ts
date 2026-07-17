@@ -163,16 +163,41 @@ interface AnalysisResult {
 async function doAnalyze(): Promise<AnalysisResult> {
     var empty: AnalysisResult = { ok: false, ids: [], nets: {}, comps: new Set(), neta: [], nl: '', csv: '', summary: '' };
 
-    var selectedDesigs = new Set<string>();
+    // Step 1: gather selected primitives and categorize by type.
+    //   - selectedDesignators: components selected (we use these as "definitely include" anchors)
+    //   - selectedNets: nets touched by selected pins/wires (used to filter the rest of the netlist)
+    //   - selectedPins: per-component set of pin numbers we know are in the selection
+    // The user may have selected only wires/pins (e.g. a few nets) without grabbing whole
+    // components, so we must not require a non-empty selectedDesignators — that was the
+    // previous bug where empty designators made us fall back to "include everything".
+    var selectedDesignators = new Set<string>();
+    var selectedNets = new Set<string>();
+    var selectedPinsByComp: Record<string, Set<string>> = {};
     try {
         var primitives = await eda.sch_SelectControl.getAllSelectedPrimitives();
         if (primitives) {
             for (var i = 0; i < primitives.length; i++) {
+                var p = primitives[i];
                 try {
-                    var pt = primitives[i].getState_PrimitiveType && primitives[i].getState_PrimitiveType();
-                    if (!pt || (pt !== 'COMPONENT' && pt !== 6)) continue;
-                    var d = primitives[i].getState_Designator && primitives[i].getState_Designator();
-                    if (d) selectedDesigs.add(d);
+                    var pt = p.getState_PrimitiveType && p.getState_PrimitiveType();
+                    // 6 = COMPONENT in JLCEDA sch
+                    if (pt === 'COMPONENT' || pt === 6) {
+                        var d = p.getState_Designator && p.getState_Designator();
+                        if (d) selectedDesignators.add(d);
+                    } else if (pt === 'PIN' || pt === 5) {
+                        // Pin: read its owning component and pin number to find the net
+                        var owner = p.getState_OwnerComponentDesignator && p.getState_OwnerComponentDesignator();
+                        var pinNum = p.getState_PinNumber && p.getState_PinNumber();
+                        var pinNet = p.getState_Net && p.getState_Net();
+                        if (owner && pinNum) {
+                            if (!selectedPinsByComp[owner]) selectedPinsByComp[owner] = new Set();
+                            selectedPinsByComp[owner].add(String(pinNum));
+                        }
+                        if (pinNet) selectedNets.add(pinNet);
+                    } else if (pt === 'WIRE' || pt === 7) {
+                        var wn = p.getState_Net && p.getState_Net();
+                        if (wn) selectedNets.add(wn);
+                    }
                 } catch (_) {}
             }
         }
@@ -186,6 +211,15 @@ async function doAnalyze(): Promise<AnalysisResult> {
         empty.error = '请先在原理图中框选需要分析的元件';
         return empty;
     }
+
+    // Decide which designators to keep. If the user selected any whole components,
+    // keep those plus any components that have at least one selected pin
+    // (because selecting a pin/wire typically means "I want this net").
+    // If the user only selected wires (no component, no pin), fall back to
+    // "include only components that touch a selected net".
+    var includeDesigs = new Set<string>(selectedDesignators);
+    var pinKeys = Object.keys(selectedPinsByComp);
+    for (var pi = 0; pi < pinKeys.length; pi++) includeDesigs.add(pinKeys[pi]);
 
     var nets: Record<string, string[]> = {};
     var comps = new Set<string>();
@@ -202,22 +236,62 @@ async function doAnalyze(): Promise<AnalysisResult> {
                 var desig = (c.props && c.props.Designator) || '';
                 // Filter non-refdes: pastes, notes, query strings etc.
                 if (!desig || desig.length > 10 || !/^[A-Za-z][A-Za-z0-9_]*\d+$/.test(desig)) continue;
-                if (selectedDesigs.size > 0 && !selectedDesigs.has(desig)) continue;
-                comps.add(desig);
+
+                // Two filtering modes:
+                //   1) user selected at least one whole component or pin: restrict to those
+                //   2) user only selected wires / nothing categorical: include components
+                //      that participate in any selected net
+                var includeThis = false;
+                if (includeDesigs.size > 0) {
+                    includeThis = includeDesigs.has(desig);
+                } else if (selectedNets.size > 0) {
+                    // will be set true below if any pin of this desig is in a selected net
+                    includeThis = false;
+                } else {
+                    // Nothing usable was selected — refuse to dump the whole schematic
+                    empty.error = '请先在原理图中框选需要分析的元件（或引脚/连线）';
+                    return empty;
+                }
+
                 var pim = c.pinInfoMap || c.pins || c.pinMap || {};
                 var pnKeys = Object.keys(pim);
+                var compPins: string[] = [];
                 for (var j = 0; j < pnKeys.length; j++) {
                     var pin = pim[pnKeys[j]];
                     if (!pin || typeof pin !== 'object') continue;
-                    var net = pin.net || '';
-                    var num = pin.number || pnKeys[j];
-                    if (net && num) {
-                        if (!nets[net]) nets[net] = [];
-                        nets[net].push(desig + '-' + num);
+                    var pnet = pin.net || '';
+                    var pnum = pin.number || pnKeys[j];
+                    if (pnet && pnum) compPins.push(desig + '-' + pnum);
+                    if (pnet && selectedNets.has(pnet) && includeDesigs.size === 0) {
+                        // wire-only selection: include this component
+                        includeThis = true;
+                    }
+                }
+                if (!includeThis) continue;
+                comps.add(desig);
+                for (var cp = 0; cp < compPins.length; cp++) {
+                    var entry = compPins[cp];
+                    // Use the net from the raw netlist entry; fall back to '' if missing
+                    var pinNet = '';
+                    for (var jj = 0; jj < pnKeys.length; jj++) {
+                        var pp = pim[pnKeys[jj]];
+                        if (pp && (pp.number === entry.split('-')[1] || pnKeys[jj] === entry.split('-')[1])) {
+                            pinNet = pp.net || '';
+                            break;
+                        }
+                    }
+                    if (pinNet) {
+                        if (!nets[pinNet]) nets[pinNet] = [];
+                        nets[pinNet].push(entry);
                     }
                 }
             }
         } catch (_) {}
+    }
+
+    if (comps.size === 0) {
+        empty.error = '所选区域未匹配到任何元件（请尝试框选稍大一些的区域，或确保选中了元件本身）';
+        return empty;
     }
 
     var neta = Object.keys(nets).sort();

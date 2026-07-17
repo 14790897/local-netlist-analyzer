@@ -1,3 +1,16 @@
+# 1.3.2
+
+## 修复
+
+1. **框选失效，默认包含全部元件**：原 `doAnalyze` 只收集"完整 component"作为过滤依据（`getState_PrimitiveType() === 'COMPONENT'`）。如果用户框选时只覆盖到了引脚/连线（没选到 component 主体），`selectedDesigs` 集合为空，旧代码 `if (selectedDesigs.size > 0 && !selectedDesigs.has(desig))` 会**直接跳过过滤**，结果整张网表的所有元件都被当成"选中"，看似"默认全部"。
+
+   新的过滤逻辑同时识别三种选区：
+   - **component 主体**：直接按 Designator 收录
+   - **pin**：通过 `getState_OwnerComponentDesignator + getState_PinNumber` 反推所属 component
+   - **wire**：通过 `getState_Net` 收集网络，再反推"任何引脚落在这些网络上的 component"
+   - 如果只选了 wire（没 component/pin），includeDesigs 为空，自动切到"按网络反推 component"模式
+   - 如果完全没有任何可用信息（空选区），直接报错"请先框选"，不再静默退回全表
+
 # 1.3.1
 
 ## 新增
