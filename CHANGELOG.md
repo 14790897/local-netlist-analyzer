@@ -1,3 +1,27 @@
+# 1.3.5
+
+## 修复 (嘉立创 V3.2 沙箱兼容)
+
+1. **枚举值改用 V3.2 字符串**: `getState_PrimitiveType()` 在 V3.2 返回 `'Component' / 'ComponentPin' / 'Wire'`(字符串, 见 prodocs ESCH_PrimitiveType 枚举), 旧代码用 `'COMPONENT' / 6` 等数字/大写全部静默不匹配. 改为同时接受 `'Component' / 'COMPONENT' / 6` 三种形式.
+
+2. **Pin owner 反查改用 `getAllPinsByPrimitiveId`**: V3.2 的 `ISCH_PrimitivePin / ISCH_PrimitiveComponentPin` 父类根本没有 `getState_OwnerComponentDesignator()` 方法 (pro-api-types 0.3.6 类型定义中也没有). 改为: 先记下选中 pin 的 primitiveId, 再 `eda.sch_PrimitiveComponent.getAll()` + `getAllPinsByPrimitiveId(primitiveId)` 反查 owner designator.
+
+3. **空选区时区分"没选"vs"API 不可用"**: 之前 ids 为空时一律报"请先在原理图中框选". 现在先检查 `eda.sch_SelectControl.getAllSelectedPrimitives` 是否真的存在(可能在 V3.2 沙箱初始化失败时不存在), 如果 API 不可用, 报"当前环境未提供 sch_SelectControl API。请在原理图页面打开,或刷新编辑器重试 (V3.2 沙箱需要 sch canvas 已激活)".
+
+4. **右键菜单注册**: extension.json 缺 `contextMenus` 字段, 右键菜单从来没注册. 加上 `contextMenus.sch.local-netlist-ctx`(分析选中区域网表 / AI 分析选中区域网表). V3.2 推荐同时在 `activate()` 里调 `eda.sys_RightClickMenu.changeMenu()` 二次注册.
+
+# 1.3.4
+
+## 修复 (installV32Shim 三档判定)
+
+`installV32Shim` v1.3.3 在 V3.2 sandbox 里 alias `eda = _EXTAPI_ROOT_`, 但 sandbox 自己的 eda 已经是 V3.0 兼容, 覆盖反而破坏. 改为 tier-based: V3.0/3.1 不动, V3.2 sandbox 不动, 只在 V3.2 main page 缺 eda 时才 shim.
+
+# 1.3.3
+
+## 修复 (V3.2 防御性兼容 shim)
+
+V3.2 把 `eda` 从 `window.eda` 移到 `_EXTAPI_SCRIPT_SPACES_[uuid].eda` 沙箱, primitive 从 getter (`getState_*`) 改为 plain property. 加 `installV32Shim()` 自动探测: V3.0/3.1 沙箱不动; V3.2 沙箱 alias eda 到 root; V3.2 主页面缺 eda 时同样 alias + 包装 4 个 primitive 返回方法 (getAllSelectedPrimitives / getSelectedPrimitives / getPrimitivesByPrimitiveId / getPrimitiveByPrimitiveId) 把 plain property 适配回 getter.
+
 # 1.3.2
 
 ## 修复

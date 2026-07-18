@@ -268,23 +268,59 @@ async function doAnalyze(): Promise<AnalysisResult> {
                 var p = primitives[i];
                 try {
                     var pt = p.getState_PrimitiveType && p.getState_PrimitiveType();
-                    // 6 = COMPONENT in JLCEDA sch
-                    if (pt === 'COMPONENT' || pt === 6) {
+                    // V3.2 returns string enum: 'Component' / 'ComponentPin' / 'Wire' (see prodocs ENUM ESCH_PrimitiveType)
+                    // Be permissive: accept old 'COMPONENT'/'PIN'/'WIRE' too for V3.0 backward compat.
+                    if (pt === 'Component' || pt === 'COMPONENT' || pt === 6) {
                         var d = p.getState_Designator && p.getState_Designator();
                         if (d) selectedDesignators.add(d);
-                    } else if (pt === 'PIN' || pt === 5) {
-                        // Pin: read its owning component and pin number to find the net
-                        var owner = p.getState_OwnerComponentDesignator && p.getState_OwnerComponentDesignator();
+                    } else if (pt === 'ComponentPin' || pt === 'Pin' || pt === 'PIN' || pt === 5) {
+                        // ComponentPin / Pin: V3.2 Pin class has no getState_OwnerComponentDesignator;
+                        // we'll re-attribute to its owner via getAllPinsByPrimitiveId below.
                         var pinNum = p.getState_PinNumber && p.getState_PinNumber();
                         var pinNet = p.getState_Net && p.getState_Net();
-                        if (owner && pinNum) {
-                            if (!selectedPinsByComp[owner]) selectedPinsByComp[owner] = new Set();
-                            selectedPinsByComp[owner].add(String(pinNum));
+                        if (pinNum) {
+                            // Mark by primitiveId for later lookup
+                            try {
+                                var pid = p.getState_PrimitiveId && p.getState_PrimitiveId();
+                                if (pid) selectedPinsByComp[pid] = new Set([String(pinNum)]);
+                            } catch (_) {}
                         }
                         if (pinNet) selectedNets.add(pinNet);
-                    } else if (pt === 'WIRE' || pt === 7) {
+                    } else if (pt === 'Wire' || pt === 'WIRE' || pt === 7) {
                         var wn = p.getState_Net && p.getState_Net();
                         if (wn) selectedNets.add(wn);
+                    }
+                } catch (_) {}
+            }
+        }
+    } catch (e) {
+        // V3.2 sandbox can throw if sch canvas isn't active. Log so the user sees a real reason
+        // instead of the generic "请先在原理图中框选..." error.
+        return Object.assign(empty, { error: '无法读取当前选中: ' + (e && (e as any).message || String(e)) + '。请先在原理图页打开并框选元件' });
+    }
+
+    // Re-attribute selected pins to their owning components (V3.2 has no getState_OwnerComponentDesignator)
+    //   For each selected pin primitiveId, find which component lists it among getAllPinsByPrimitiveId
+    try {
+        var allComps = await eda.sch_PrimitiveComponent.getAll();
+        if (allComps) {
+            for (var ci = 0; ci < allComps.length; ci++) {
+                var c = allComps[ci];
+                try {
+                    var d = c.getState_Designator && c.getState_Designator();
+                    var cp = c.getState_PrimitiveId && c.getState_PrimitiveId();
+                    if (!d || !cp) continue;
+                    var pins = await eda.sch_PrimitiveComponent.getAllPinsByPrimitiveId(cp);
+                    if (!pins) continue;
+                    for (var pn = 0; pn < pins.length; pn++) {
+                        var p = pins[pn];
+                        try {
+                            var ppid = p.getState_PrimitiveId && p.getState_PrimitiveId();
+                            if (ppid && selectedPinsByComp[ppid]) {
+                                if (!selectedPinsByComp[d]) selectedPinsByComp[d] = new Set();
+                                selectedPinsByComp[d].add(p.getState_PinNumber && p.getState_PinNumber() || '');
+                            }
+                        } catch (_) {}
                     }
                 } catch (_) {}
             }
@@ -296,7 +332,14 @@ async function doAnalyze(): Promise<AnalysisResult> {
     if (!ids || !ids.length) try { ids = await eda.sch_SelectControl.getSelectedPrimitives_PrimitiveId(); } catch (_) {}
 
     if (!ids || !ids.length) {
-        empty.error = '请先在原理图中框选需要分析的元件';
+        // Distinguish "nothing selected" from "API not available in this environment"
+        var apiAvail = false;
+        try { apiAvail = typeof (eda as any).sch_SelectControl === 'object' && typeof (eda as any).sch_SelectControl.getAllSelectedPrimitives === 'function'; } catch (_) {}
+        if (!apiAvail) {
+            empty.error = '当前环境未提供 sch_SelectControl API。请在原理图页面打开,或刷新编辑器重试 (V3.2 沙箱需要 sch canvas 已激活)';
+        } else {
+            empty.error = '请先在原理图中框选需要分析的元件(选中数量=0)';
+        }
         return empty;
     }
 
