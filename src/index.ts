@@ -5,58 +5,80 @@
 export { openSettings, openAIChat } from './ai';
 export { startBridge, stopBridge } from './ws-bridge';
 export function activate(_status?: 'onStartupFinished', _arg?: string): void {
+    // V3.0/3.1: window.eda already has sch_SelectControl etc.
+    // V3.2 sandbox: eda is already the V3.0-compatible shim, also works.
+    // V3.2 main page (when our bundle accidentally lands there):
+    //   re-alias eda to _EXTAPI_ROOT_ and patch getState_* getters on
+    //   primitives so the rest of the code (which uses p.getState_*())
+    //   works as-is.
     try { installV32Shim(); } catch (_) {}
     try { startBridge(); } catch (_) {}
 }
 
-// JLCEDA V3.2.148 moved the extension API from `window.eda` to
-// `window._EXTAPI_ROOT_`, and changed primitive shape from getter-based
-// (getState_Designator, getState_Net, …) to plain property access
-// (designator, net, primitiveType, …). Older v3.0/3.1 extensions
-// expecting `eda.*` and `p.getState_*` will silently fail in V3.2.
+// JLCEDA V3.2.148 split the extension API across two places:
+//   - extension sandbox: `self.eda` already has the V3.0-compatible shape
+//     (sch_SelectControl with getState_* getters on each primitive), so
+//     legacy code "just works" inside the sandbox.
+//   - main page:        `eda` no longer exists. The new root is
+//     `window._EXTAPI_ROOT_`, and primitive objects expose their fields
+//     as plain properties (primitiveType, designator, net, …) without
+//     the legacy getState_* getters.
 //
-// This shim re-aliases `eda` to `_EXTAPI_ROOT_` and wraps each
-// primitive so the legacy getter API still works. We keep the shim
-// idempotent and silent if either side is missing, so v3.0 still runs.
+// Most of our code (doAnalyze, aiAnalyzeSelection, etc.) calls
+// `p.getState_PrimitiveType()`, `p.getState_Designator()` etc., which is
+// fine inside the V3.2 sandbox but returns `undefined` on the V3.2 main
+// page. This shim aliases `eda` → `_EXTAPI_ROOT_` and wraps each
+// primitive returned by the four selection methods so the legacy getters
+// forward to the matching plain field.
+//
+// Safe on V3.0/3.1: if window.eda is already a real V3.0 API, the shim
+// is a no-op (it only runs when eda is missing and _EXTAPI_ROOT_ is
+// present).
 function installV32Shim(): void {
     try {
         var g: any = (typeof globalThis !== 'undefined' ? globalThis : window) as any;
         var root: any = g._EXTAPI_ROOT_;
-        if (!root || g.__edaShimInstalled) return;
-        if (typeof g.eda !== 'undefined' && g.eda && g.eda !== root) {
-            // V3.0 path already active — nothing to shim
+
+        // Case 1: eda already populated (V3.0/3.1 sandbox).
+        if (g.eda && g.eda !== root && g.eda.sch_SelectControl) return;
+
+        // Case 2: V3.2 sandbox or V3.2 main page — try to bind to whatever
+        // root we can find. Prefer the extension-sandbox eda (it already
+        // has the legacy getters); fall back to _EXTAPI_ROOT_ (main page).
+        if (g.eda && g.eda.sch_SelectControl) {
             g.__edaShimInstalled = true;
             return;
         }
+        if (!root) return;
+
+        // For V3.2 main page, alias eda to _EXTAPI_ROOT_ and patch the
+        // four primitive-returning methods so the legacy getState_*
+        // getters exist on every primitive they return.
         g.eda = root;
         g.__edaShimInstalled = true;
 
-        // Wrap primitive arrays so legacy .getState_* getters return the
-        // matching plain field. We only patch the methods our code uses.
-        var proto: any = {
-            getState_PrimitiveType: function () { return this.primitiveType; },
-            getState_Designator:    function () { return this.designator; },
-            getState_Net:           function () { return this.net; },
-            getState_OwnerComponentDesignator: function () { return this.ownerComponentDesignator; },
-            getState_PinNumber:     function () { return this.number; },
-            getState_PrimitiveId:   function () { return this.primitiveId || this.id; },
+        var getters: Record<string, (p: any) => any> = {
+            getState_PrimitiveType: function (p) { return p.primitiveType; },
+            getState_Designator:    function (p) { return p.designator; },
+            getState_Net:           function (p) { return p.net; },
+            getState_OwnerComponentDesignator: function (p) { return p.ownerComponentDesignator; },
+            getState_PinNumber:     function (p) { return p.number; },
+            getState_PrimitiveId:   function (p) { return p.primitiveId || p.id; },
         };
         var shimPrimitives = function (list: any): any {
             if (!list || !Array.isArray(list)) return list;
             for (var i = 0; i < list.length; i++) {
                 var p = list[i];
-                if (p && !p.__shimmed && typeof p === 'object') {
-                    for (var k in proto) {
-                        if (typeof p[k] === 'undefined' && typeof proto[k] === 'function') {
-                            try { p[k] = proto[k]; } catch (_) {}
-                        }
+                if (!p || typeof p !== 'object' || p.__edaShimPatched) continue;
+                for (var k in getters) {
+                    if (typeof p[k] === 'undefined') {
+                        try { p[k] = getters[k](p); } catch (_) {}
                     }
-                    p.__shimmed = true;
                 }
+                p.__edaShimPatched = true;
             }
             return list;
         };
-        // Hook the two selection methods that return primitives
         if (root.sch_SelectControl) {
             var sc = root.sch_SelectControl;
             for (var m of ['getAllSelectedPrimitives', 'getSelectedPrimitives', 'getPrimitivesByPrimitiveId', 'getPrimitiveByPrimitiveId']) {
