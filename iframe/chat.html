@@ -346,9 +346,12 @@ async function doSend() {
         var endpoint = (cfg.endpoint || 'https://api.openai.com/v1').replace(/\/+$/, '');
         if (!endpoint.includes('/chat/completions')) endpoint += '/chat/completions';
 
-        // Add timeout wrapper to avoid hanging forever
+        // Add timeout wrapper to avoid hanging forever.
+        // Reasoning models (deepseek-v4-pro, o1, etc.) can take 60-120s
+        // to finish their reasoning_content before returning a real reply.
+        // 60s is too short — bump to 180s.
         var controller = new AbortController();
-        var timeoutId = setTimeout(function() { controller.abort(); }, 60000);
+        var timeoutId = setTimeout(function() { controller.abort(); }, 180000);
 
         var resp = await fetch(endpoint, {
             method: 'POST',
@@ -400,7 +403,7 @@ async function doSend() {
         }
     } catch (e) {
         hideTyping();
-        var errMsg = e.name === 'AbortError' ? '请求超时(60s),请检查网络或 API 配置' : '请求失败: ' + (e.message || String(e));
+        var errMsg = e.name === 'AbortError' ? '请求超时(180s)。deepseek-v4-pro 等推理模型思考时间较长,如频繁超时请检查网络或换更快的模型' : '请求失败: ' + (e.message || String(e));
         showError(errMsg);
         // Remove the last user message from chatMessages on error
         try { chatMessages.pop(); } catch (_) {}

@@ -1,3 +1,11 @@
+# 1.3.6
+
+## 修复 (deepseek-v4-pro reasoning 超时)
+
+1. **chat.html AbortController timeout 从 60s 改为 180s**: 实测 `deepseek-v4-pro` (reasoning model) 在 `max_tokens=4000` + 包含 16 元件 13 网络 system context 的完整网表分析 prompt 下, 真实响应时间是 60-120s(76s 实测). 60s AbortController 太短, 总是 abort 后才拿到 200 OK, 报"请求超时(60s)". 改 180s 给 reasoning 模型充足时间。
+
+2. **错误信息具体化**: "请求超时(60s),请检查网络或 API 配置" → "请求超时(180s)。deepseek-v4-pro 等推理模型思考时间较长,如频繁超时请检查网络或换更快的模型"。
+
 # 1.3.5
 
 ## 修复 (嘉立创 V3.2 沙箱兼容)
