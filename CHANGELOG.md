@@ -1,3 +1,9 @@
+# 1.3.7
+
+## 修复 (analyzeSelection dialog 视觉混淆)
+
+1. **dialog 分隔符 | 改成 ·**: 原来用 ASCII `|` 分隔 summary + detail, 但嘉立创 dialog 用的是中文字体, ASCII `|` 字符被渲染成"中"字形, 看上去像 "37选中中 54元件 40网络"(实际是 "37选中 | 54元件 40网络"), 用户疑惑。改为 `·` (中点) 作为分隔符, 任意中文字体都能正确显示。
+
 # 1.3.6
 
 ## 修复 (deepseek-v4-pro reasoning 超时)

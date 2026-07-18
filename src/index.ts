@@ -179,7 +179,9 @@ export async function analyzeSelection(): Promise<void> {
         for (var dn = 0; dn < Math.min(6, r.neta.length); dn++) {
             detail.push(r.neta[dn] + '(' + r.nets[r.neta[dn]].length + 'pin)');
         }
-        showDialog(r.summary + (detail.length > 0 ? ' | ' + detail.join(' ') : ''));
+        // Use 「·」 middle dot instead of ASCII '|' — pipe character renders as 「中」 in
+        // some Chinese monospace fonts used by JLCEDA dialogs, causing user confusion.
+        showDialog(r.summary + (detail.length > 0 ? '  ·  ' + detail.join(' · ') : ''));
     } catch (e) {
         showDialog('分析出错: ' + (e && (e as any).message || String(e)));
     }
