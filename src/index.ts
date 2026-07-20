@@ -470,8 +470,9 @@ function loadAIConfig(): any {
 }
 
 /** Read file-save config — controls whether analyzeSelection / aiAnalyzeSelection
- *  writes CSV + JSON to the project directory. Default true (legacy behavior).
- *  Settings UI lives in iframe/settings.html under the "文件保存设置" section. */
+ *  writes CSV + JSON to the project directory. Default false (user must opt in
+ *  via the checkbox in settings.html — we don't surprise new users by writing
+ *  files into their project directory). */
 function loadFileConfig(): { saveToDisk: boolean } {
     try {
         var raw = eda.sys_Storage.getExtensionUserConfig('__file_config');
@@ -480,5 +481,5 @@ function loadFileConfig(): { saveToDisk: boolean } {
             if (p && typeof p.saveToDisk === 'boolean') return { saveToDisk: p.saveToDisk };
         }
     } catch (_) {}
-    return { saveToDisk: true };
+    return { saveToDisk: false };
 }

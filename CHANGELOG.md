@@ -1,3 +1,11 @@
+# 1.3.9
+
+## 调整 (文件保存默认关闭)
+
+1. **`saveToDisk` 默认值从 `true` 改为 `false`**: 之前 v1.3.8 默认开, 新装扩展的用户首次分析时会在工程目录意外写 `local-netlist.csv` / `netlist-raw.json`, 体验上像是 bug。现在默认关闭, 用户在 settings.html 显式勾选 "分析后自动保存到本地" 才会写文件。
+
+2. **settings.html**: checkbox 去掉 HTML `checked` 属性, 改用 JS 显式 `cb.checked = (fcfg.saveToDisk === true)` 控制。
+
 # 1.3.8
 
 ## 新增 (文件保存配置开关)

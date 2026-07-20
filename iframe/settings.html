@@ -50,7 +50,7 @@ button{padding:8px 16px;border:none;border-radius:6px;font-size:13px;font-weight
 <h2 style="margin-top:24px">💾 文件保存设置</h2>
 
 <label style="display:flex;align-items:center;gap:6px;font-weight:normal;font-size:13px;color:#333;margin-top:6px">
-  <input id="saveToDisk" type="checkbox" checked style="width:auto;flex:none">
+  <input id="saveToDisk" type="checkbox" style="width:auto;flex:none">
   <span>分析后自动保存到本地（CSV 网表 + JSON 原始数据）</span>
 </label>
 <div class="pw-hint">关闭后只显示 dialog 摘要，<b>不写</b> <code style="background:#e5e7eb;padding:1px 4px;border-radius:3px">local-netlist.csv</code> 和 <code style="background:#e5e7eb;padding:1px 4px;border-radius:3px">netlist-raw.json</code> 到工程目录</div>
@@ -72,7 +72,7 @@ var defaults = {
     systemPrompt: '你是一个资深的电子电路设计专家。用户会提供原理图的网表数据（包含元件位号和引脚网络连接关系），请根据网表分析电路的功能、结构和工作原理。用中文回答。'
 };
 var fileDefaults = {
-    saveToDisk: true
+    saveToDisk: false
 };
 
 function waitForEda(cb, retry) {
@@ -105,7 +105,7 @@ function loadCfg() {
         var fraw = eda.sys_Storage.getExtensionUserConfig(FILE_STORAGE_KEY);
         if (fraw) { var fparsed = JSON.parse(fraw); fcfg = Object.assign({}, fileDefaults, fparsed); }
     } catch (_) {}
-    document.getElementById('saveToDisk').checked = (fcfg.saveToDisk !== false);
+    document.getElementById('saveToDisk').checked = (fcfg.saveToDisk === true);
 }
 
 function doSave() {
