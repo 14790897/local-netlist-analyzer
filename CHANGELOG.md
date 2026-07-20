@@ -1,3 +1,13 @@
+# 1.3.8
+
+## 新增 (文件保存配置开关)
+
+1. **settings.html 加 "文件保存设置" 分组**: 跟 AI 设置并列, 一个 checkbox 控制 `__file_config.saveToDisk`。默认 `true` (保持 v1.3.7 行为), 关闭后 `analyzeSelection` 和 `aiAnalyzeSelection` 都不写 `local-netlist.csv` / `netlist-raw.json`, 只在 dialog/iframe 展示结果。
+
+2. **`__file_config` 独立 storage key**: 跟 `__ai_config` 分开, 互不污染, 重置 AI 配置不会影响文件保存设置。
+
+3. **`loadFileConfig()` helper**: 默认 `{ saveToDisk: true }`, 调用 `sys_Storage.getExtensionUserConfig('__file_config')`, 解析失败或不存在时回退默认。
+
 # 1.3.7
 
 ## 修复 (analyzeSelection dialog 视觉混淆)

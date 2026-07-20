@@ -167,9 +167,11 @@ export async function analyzeSelection(): Promise<void> {
         var r = await doAnalyze();
         if (!r.ok) { showDialog(r.error || '请先在原理图中框选需要分析的元件'); return; }
 
-        // Save files
-        try { await eda.sys_FileSystem.saveFile(new Blob([r.csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
-        if (r.nl) { try { await eda.sys_FileSystem.saveFile(new Blob([r.nl], { type: 'application/json' }), 'netlist-raw.json'); } catch (_2) {} }
+        // Save files only if user enabled it in settings
+        if (loadFileConfig().saveToDisk) {
+            try { await eda.sys_FileSystem.saveFile(new Blob([r.csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
+            if (r.nl) { try { await eda.sys_FileSystem.saveFile(new Blob([r.nl], { type: 'application/json' }), 'netlist-raw.json'); } catch (_2) {} }
+        }
 
         // Store for IFrame
         storeResult(r);
@@ -193,9 +195,11 @@ export async function aiAnalyzeSelection(): Promise<void> {
         var r = await doAnalyze();
         if (!r.ok) { showDialog(r.error || '请先在原理图中框选需要分析的元件'); return; }
 
-        // Save files silently
-        try { await eda.sys_FileSystem.saveFile(new Blob([r.csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
-        if (r.nl) { try { await eda.sys_FileSystem.saveFile(new Blob([r.nl], { type: 'application/json' }), 'netlist-raw.json'); } catch (_2) {} }
+        // Save files only if user enabled it in settings
+        if (loadFileConfig().saveToDisk) {
+            try { await eda.sys_FileSystem.saveFile(new Blob([r.csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
+            if (r.nl) { try { await eda.sys_FileSystem.saveFile(new Blob([r.nl], { type: 'application/json' }), 'netlist-raw.json'); } catch (_2) {} }
+        }
 
         // Store for chat IFrame
         storeResult(r);
@@ -463,4 +467,18 @@ function loadAIConfig(): any {
         if (raw) return JSON.parse(raw);
     } catch (_) {}
     return { endpoint: 'https://api.openai.com/v1', key: '', model: 'gpt-4o-mini' };
+}
+
+/** Read file-save config — controls whether analyzeSelection / aiAnalyzeSelection
+ *  writes CSV + JSON to the project directory. Default true (legacy behavior).
+ *  Settings UI lives in iframe/settings.html under the "文件保存设置" section. */
+function loadFileConfig(): { saveToDisk: boolean } {
+    try {
+        var raw = eda.sys_Storage.getExtensionUserConfig('__file_config');
+        if (raw) {
+            var p = JSON.parse(raw);
+            if (p && typeof p.saveToDisk === 'boolean') return { saveToDisk: p.saveToDisk };
+        }
+    } catch (_) {}
+    return { saveToDisk: true };
 }
