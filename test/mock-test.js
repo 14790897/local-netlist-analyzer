@@ -106,6 +106,7 @@ var analyzeSelection = globalThis.edaEsbuildExportName.analyzeSelection;
 async function runTest() {
     console.log('\n=== EDA Extension Mock Test ===\n');
 
+    // ---------- CASE A: default (saveToDisk=false in v1.3.9) ----------
     mockDialogMsgs.length = 0;
     mockToastMsgs.length = 0;
     mockSavedFiles.length = 0;
@@ -113,31 +114,53 @@ async function runTest() {
 
     await analyzeSelection();
 
+    console.log('--- CASE A: default (no __file_config set) ---');
     console.log('Dialog:', mockDialogMsgs.join('\n'));
-    console.log('Saved files:', mockSavedFiles.map(function (f) { return f.name; }).join(', '));
+    console.log('Saved files:', mockSavedFiles.map(function (f) { return f.name; }).join(', ') || '(none)');
     console.log('Storage keys:', Object.keys(mockStorage).join(', '));
 
-    // Verify dialog contains expected data
-    var dialog = mockDialogMsgs[0] || '';
-    var hasComps = dialog.indexOf('3元件') >= 0;
-    var hasNets = dialog.indexOf('5网络') >= 0;
-    var hasVCC = dialog.indexOf('3V3') >= 0;
-    var hasGND = dialog.indexOf('GND') >= 0;
-    var csvSaved = mockSavedFiles.some(function (f) { return f.name === 'local-netlist.csv'; });
-    var jsonSaved = mockSavedFiles.some(function (f) { return f.name === 'netlist-raw.json'; });
-    var storageOk = !!mockStorage.__nl_data;
+    var dialogA = mockDialogMsgs[0] || '';
+    var hasCompsA = dialogA.indexOf('3元件') >= 0;
+    var hasNetsA = dialogA.indexOf('5网络') >= 0;
+    var hasVCCA = dialogA.indexOf('3V3') >= 0;
+    var hasGNDA = dialogA.indexOf('GND') >= 0;
+    var csvSavedA = mockSavedFiles.some(function (f) { return f.name === 'local-netlist.csv'; });
+    var jsonSavedA = mockSavedFiles.some(function (f) { return f.name === 'netlist-raw.json'; });
+    var storageOkA = !!mockStorage.__nl_data;
 
-    console.log('\nChecks:');
-    console.log('  Found 3 components:', hasComps ? '✅' : '❌');
-    console.log('  Found 5 networks:', hasNets ? '✅' : '❌');
-    console.log('  Has 3V3 net:', hasVCC ? '✅' : '❌');
-    console.log('  Has GND net:', hasGND ? '✅' : '❌');
-    console.log('  CSV saved:', csvSaved ? '✅' : '❌');
-    console.log('  JSON saved:', jsonSaved ? '✅' : '❌');
-    console.log('  Storage data:', storageOk ? '✅' : '❌');
+    console.log('\n  Found 3 components:', hasCompsA ? '\u2705' : '\u274c');
+    console.log('  Found 5 networks:', hasNetsA ? '\u2705' : '\u274c');
+    console.log('  Has 3V3 net:', hasVCCA ? '\u2705' : '\u274c');
+    console.log('  Has GND net:', hasGNDA ? '\u2705' : '\u274c');
+    console.log('  No file written (default):', (!csvSavedA && !jsonSavedA) ? '\u2705' : '\u274c');
+    console.log('  Storage data:', storageOkA ? '\u2705' : '\u274c');
 
-    var allPass = hasComps && hasNets && hasVCC && hasGND && csvSaved && jsonSaved && storageOk;
-    console.log('\n' + (allPass ? '✅ ALL PASS' : '❌ SOME FAILED'));
+    var caseApass = hasCompsA && hasNetsA && hasVCCA && hasGNDA && !csvSavedA && !jsonSavedA && storageOkA;
+
+    // ---------- CASE B: user opts in via __file_config.saveToDisk=true ----------
+    mockDialogMsgs.length = 0;
+    mockSavedFiles.length = 0;
+    Object.keys(mockStorage).forEach(function (k) { delete mockStorage[k]; });
+    mockStorage.__file_config = JSON.stringify({ saveToDisk: true });
+
+    await analyzeSelection();
+
+    console.log('\n--- CASE B: __file_config.saveToDisk=true (user opt-in) ---');
+    console.log('Dialog:', mockDialogMsgs.join('\n'));
+    console.log('Saved files:', mockSavedFiles.map(function (f) { return f.name; }).join(', '));
+
+    var csvSavedB = mockSavedFiles.some(function (f) { return f.name === 'local-netlist.csv'; });
+    var jsonSavedB = mockSavedFiles.some(function (f) { return f.name === 'netlist-raw.json'; });
+    var storageOkB = !!mockStorage.__nl_data;
+
+    console.log('\n  CSV saved:', csvSavedB ? '\u2705' : '\u274c');
+    console.log('  JSON saved:', jsonSavedB ? '\u2705' : '\u274c');
+    console.log('  Storage data:', storageOkB ? '\u2705' : '\u274c');
+
+    var caseBpass = csvSavedB && jsonSavedB && storageOkB;
+
+    var allPass = caseApass && caseBpass;
+    console.log('\n' + (allPass ? '\u2705 ALL PASS (CASE A default + CASE B opt-in)' : '\u274c SOME FAILED'));
     if (!allPass) process.exit(1);
 }
 

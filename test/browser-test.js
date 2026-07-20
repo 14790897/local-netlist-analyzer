@@ -101,6 +101,13 @@ function test(name, condition) {
         process.exit(1);
     }
 
+    // Step 3.5 (v1.3.9): opt in to file saves so we can verify CSV/JSON content
+    // v1.3.9 changed the default to saveToDisk=false to avoid surprise writes
+    // for new users. The file-write assertions below verify the opt-in path.
+    await page.evaluate(function () {
+        window.___storage.__file_config = JSON.stringify({ saveToDisk: true });
+    });
+
     // Step 4: Run analyzeSelection with 3 selected components
     console.log('4. Test: 3 selected components...');
     await page.evaluate(async function () {
