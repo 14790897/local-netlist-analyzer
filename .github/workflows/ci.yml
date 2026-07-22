@@ -53,5 +53,9 @@ jobs:
           name: extension-package
       - uses: softprops/action-gh-release@v2
         with:
-          files: '*.eext'
+          # Only attach the .eext that matches the tag name (e.g. v1.4.0 →
+          # local-netlist-analyzer_v1.4.0.eext). Without this filter we'd ship
+          # every historical .eext from build/dist/ in the release.
+          files: local-netlist-analyzer_${{ github.ref_name }}.eext
+          fail_on_unmatched_files: true
           generate_release_notes: true
