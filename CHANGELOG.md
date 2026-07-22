@@ -1,3 +1,32 @@
+# 1.4.0
+
+## 新增 (分析结果带器件型号, dialog/AI 都知道每个 desig 是什么)
+
+之前 `analyzeSelection` 的 dialog 只显示 `R5, U1, C2` 这种 designator 引用编号,AI 收到的 prompt 也只有 desig 列表。AI 只能猜 "U 系列是 IC, R 是电阻",经常猜错型号 / 封装。
+
+JLCEDA v2.0.0 网表 JSON 的 `props` 实际带有 30+ 字段(Dump 实测: `Value` / `DeviceName` / `Manufacturer` / `Manufacturer Part` / `Supplier Part` / `LCSC Part Name` / `Footprint` / `FootprintName` / `Description` / `Datasheet` ...)。`parseV2Netlist` 之前只读 `Designator`,其余全丢。
+
+1. **`parseV2Netlist` → `extractCompInfo(props)`**: 新 helper 从 v2.0.0 `props` 抽公共字段到扁平 `ComponentInfo`(value/name/manufacturer/mfrPart/lcsc/lcscDesc/footprint/footprintName/description/datasheet)。每个 symbol 自带啥模板字段就抽啥,字段缺失不报错。`Name` 字段跳过 `={Value}` 模板占位符,真值走 `Value`。
+
+2. **dialog 第二行加器件型号**:
+   ```
+   3选中 3元件 5网络 · 3V3(1pin) · GND(3pin) · NET_PB8(1pin) · NET_PB9(1pin) · VCC(1pin)
+   U1: ESP32-C3-WROOM-02-N4 · 2.4GHz  ·  R1: 0603WAF1002T5E · 10kΩ  ·  R2: 0603WAF4701T5E · 4.7kΩ
+   ```
+   `compInfoShortLine` 优先 `DeviceName`(IC 看型号),后跟 `Value`(电阻/电容看值);再补 `Footprint` 区分封装。
+
+3. **`__nl_data` 多存 `compInfo: Record<desig, ComponentInfo>`**:
+   - AI 路径(aiAnalyzeSelection)的 `__ai_prefill` 会多塞一段"器件型号清单",格式:
+     ```
+     --- 器件型号清单（来自网表 props）---
+     器件清单（按 Designator 排序）：
+       R1: 10kΩ (UNI-ROYAL(厚声)) [LCSC: C25804] — 厚声 0603 10kΩ ±1% 1/10W
+       U1: ESP32-C3-WROOM-02-N4 (ESPRESSIF(乐鑫)) [LCSC: C2934560] — 不带固件 2.4GHz Wi-Fi（802.11b/g/n）+ 蓝牙5模组
+     ```
+   - 手动 `AI 对话` 也吃到(chat.html 同样拼 compInfo 段进 system context),用户问"U1 是什么芯片?" 现在能答"ESP32-C3-WROOM-02-N4"。
+
+4. **向后兼容**: `compInfo` 字段对旧 chat.html 透明(没找到字段就忽略,跟之前行为一致)。
+
 # 1.3.9
 
 ## 调整 (文件保存默认关闭)

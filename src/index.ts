@@ -183,7 +183,21 @@ export async function analyzeSelection(): Promise<void> {
         }
         // Use 「·」 middle dot instead of ASCII '|' — pipe character renders as 「中」 in
         // some Chinese monospace fonts used by JLCEDA dialogs, causing user confusion.
-        showDialog(r.summary + (detail.length > 0 ? '  ·  ' + detail.join(' · ') : ''));
+        var dialogMsg = r.summary;
+        if (detail.length > 0) dialogMsg += '  ·  ' + detail.join(' · ');
+        // v1.4.0: append a second line with up to 6 component short labels
+        // (value/name/lcsc) so the user can see what the parts actually are
+        // (e.g. "R5: 10kΩ 0805 · U1: ESP32-C3-WROOM-02-N4"). Keep the dialog
+        // readable: at most 6 lines, skip if the user has no component info.
+        var compKeys = Object.keys(r.compInfo || {});
+        if (compKeys.length > 0) {
+            var compDetail: string[] = [];
+            for (var ck = 0; ck < Math.min(6, compKeys.length); ck++) {
+                compDetail.push(compInfoShortLine(compKeys[ck], r.compInfo[compKeys[ck]]));
+            }
+            dialogMsg += '\n' + compDetail.join('  ·  ');
+        }
+        showDialog(dialogMsg);
     } catch (e) {
         showDialog('分析出错: ' + (e && (e as any).message || String(e)));
     }
@@ -215,7 +229,10 @@ export async function aiAnalyzeSelection(): Promise<void> {
 
         // Build preset prompt — explain what the netlist is, then ask for a structured analysis.
         // The chat IFrame will pick this up via __ai_prefill and auto-send it.
+        // v1.4.0: append a "what each component is" list (DeviceName + Value + LCSC code)
+        // so the AI doesn't have to guess part numbers from the desig alone.
         var nets = Object.keys(r.nets);
+        var compListBlock = buildCompInfoPrompt(r.compInfo);
         var preset =
             '请基于以下原理图局部网表（已框选 ' + r.comps.size + ' 个元件、' + r.neta.length + ' 个网络），' +
             '用中文给出结构化分析。覆盖以下要点：\n' +
@@ -224,6 +241,7 @@ export async function aiAnalyzeSelection(): Promise<void> {
             '3) 关键信号路径（输入→处理→输出）\n' +
             '4) 元件分工：U 系列负责什么、R/C/Q/L/LED 各起什么作用\n' +
             '5) 任何值得注意的设计要点或潜在问题';
+        if (compListBlock) preset += '\n\n--- 器件型号清单（来自网表 props）---\n' + compListBlock;
         try { eda.sys_Storage.setExtensionUserConfig('__ai_prefill', preset); } catch (_) {}
 
         // Open chat directly
@@ -252,10 +270,102 @@ interface AnalysisResult {
     nl: string;
     csv: string;
     summary: string;
+    compInfo: Record<string, ComponentInfo>;
+}
+
+/** Component metadata extracted from JLCEDA v2.0.0 netlist `props` object.
+ *  All fields are optional because each symbol carries a different set of
+ *  template-specific keys (a resistor has only Value+Footprint, an IC carries
+ *  30+ fields like Wireless Standard / Output Power). The "common" fields below
+ *  are present on virtually every symbol — we copy whichever ones exist. */
+interface ComponentInfo {
+    value?: string;          // "10kΩ", "100nF", "2.4GHz" — true value, NOT the "Name" template placeholder
+    name?: string;           // DeviceName (raw model number, e.g. "ESP32-C3-WROOM-02-N4")
+    manufacturer?: string;   // "ESPRESSIF(乐鑫)"
+    mfrPart?: string;        // "ESP32-C3-WROOM-02-N4"
+    lcsc?: string;           // Supplier Part LCSC code, e.g. "C2934560"
+    lcscDesc?: string;       // LCSC Part Name (Chinese description)
+    footprint?: string;      // Supplier Footprint (LCSC footprint name)
+    footprintName?: string;  // FootprintName (full footprint name)
+    description?: string;    // Description (semicolon-separated Chinese)
+    datasheet?: string;      // Datasheet URL
+}
+
+/** Pull the common fields from a JLCEDA v2.0.0 `props` object into a flat
+ *  ComponentInfo. We never fail if a field is missing — some symbols (e.g.
+ *  passive parts) simply don't carry every key. */
+function extractCompInfo(props: any): ComponentInfo {
+    if (!props || typeof props !== 'object') return {};
+    var get = function (k: string): string {
+        var v = props[k];
+        if (v === undefined || v === null) return '';
+        var s = String(v).trim();
+        return s;
+    };
+    var info: ComponentInfo = {};
+    var v = get('Value');
+    if (v && v !== '={Value}') info.value = v;  // skip template placeholder
+    var dn = get('DeviceName');  if (dn) info.name = dn;
+    var mfr = get('Manufacturer'); if (mfr) info.manufacturer = mfr;
+    var mp = get('Manufacturer Part'); if (mp) info.mfrPart = mp;
+    var lc = get('Supplier Part'); if (lc) info.lcsc = lc;
+    var ld = get('LCSC Part Name'); if (ld) info.lcscDesc = ld;
+    var fp = get('Supplier Footprint'); if (fp) info.footprint = fp;
+    var fpn = get('FootprintName'); if (fpn) info.footprintName = fpn;
+    var desc = get('Description'); if (desc) info.description = desc;
+    var ds = get('Datasheet'); if (ds) info.datasheet = ds;
+    return info;
+}
+
+/** One-line summary used in dialog (e.g. "R5: 10kΩ" or "U1: ESP32-C3-WROOM-02-N4 2.4GHz").
+ *  Tries to surface the *most identifying* piece of info first:
+ *    - if DeviceName is present (IC/chip) → that, then Value as supporting context
+ *    - else (passive parts) → Value
+ *  Then footprint as secondary if it adds info.
+ *  We never throw on missing data. */
+function compInfoShortLine(desig: string, info: ComponentInfo): string {
+    var parts: string[] = [];
+    if (info.name) {
+        parts.push(info.name);
+        if (info.value) parts.push(info.value);
+    } else if (info.value) {
+        parts.push(info.value);
+    } else if (info.lcsc) {
+        parts.push(info.lcsc);
+    }
+    if (info.footprint && info.footprint !== info.name) parts.push(info.footprint);
+    return desig + (parts.length ? ': ' + parts.join(' · ') : '');
+}
+
+/** Build the "what each component is" section appended to the AI system prompt.
+ *  Format example:
+ *    器件清单（按 Designator 排序）：
+ *      U1: ESP32-C3-WROOM-02-N4 (ESPRESSIF(乐鑫)) [LCSC: C2934560] — 不带固件 2.4GHz Wi-Fi（802.11b/g/n）+ 蓝牙5模组
+ *      R5: 10kΩ
+ *      C2: 100nF (0805)
+ *  Returns '' if there's nothing to add (no compInfo). */
+function buildCompInfoPrompt(compInfo: Record<string, ComponentInfo>): string {
+    var keys = Object.keys(compInfo || {}).sort();
+    if (!keys.length) return '';
+    var lines: string[] = ['器件清单（按 Designator 排序）：'];
+    for (var i = 0; i < keys.length; i++) {
+        var d = keys[i];
+        var info = compInfo[d];
+        var parts: string[] = [];
+        if (info.name) parts.push(info.name);
+        if (info.value) parts.push(info.value);
+        if (info.manufacturer) parts.push('(' + info.manufacturer + ')');
+        if (info.lcsc) parts.push('[LCSC: ' + info.lcsc + ']');
+        if (info.footprint && info.footprint !== info.name) parts.push(info.footprint);
+        var head = d + ': ' + (parts.length ? parts.join(' ') : '(无附加信息)');
+        if (info.lcscDesc) head += ' — ' + info.lcscDesc;
+        lines.push('  ' + head);
+    }
+    return lines.join('\n');
 }
 
 async function doAnalyze(): Promise<AnalysisResult> {
-    var empty: AnalysisResult = { ok: false, ids: [], nets: {}, comps: new Set(), neta: [], nl: '', csv: '', summary: '' };
+    var empty: AnalysisResult = { ok: false, ids: [], nets: {}, comps: new Set(), neta: [], nl: '', csv: '', summary: '', compInfo: {} };
 
     // Step 1: gather selected primitives and categorize by type.
     //   - selectedDesignators: components selected (we use these as "definitely include" anchors)
@@ -360,6 +470,7 @@ async function doAnalyze(): Promise<AnalysisResult> {
 
     var nets: Record<string, string[]> = {};
     var comps = new Set<string>();
+    var compInfo: Record<string, ComponentInfo> = {};
     var nl = await getNetlistText();
 
     if (nl) {
@@ -406,6 +517,11 @@ async function doAnalyze(): Promise<AnalysisResult> {
                 }
                 if (!includeThis) continue;
                 comps.add(desig);
+                // Capture per-component metadata from v2.0.0 `props` (value/name/lcsc/...)
+                // so dialog and AI prompt can show what the component actually is.
+                // Stored only on inclusion so we don't carry data for filtered-out comps.
+                var info = extractCompInfo(c.props);
+                if (Object.keys(info).length > 0) compInfo[desig] = info;
                 for (var cp = 0; cp < compPins.length; cp++) {
                     var entry = compPins[cp];
                     // Use the net from the raw netlist entry; fall back to '' if missing
@@ -446,7 +562,8 @@ async function doAnalyze(): Promise<AnalysisResult> {
         neta: neta,
         nl: nl,
         csv: csv,
-        summary: ids.length + '选中 ' + comps.size + '元件 ' + neta.length + '网络'
+        summary: ids.length + '选中 ' + comps.size + '元件 ' + neta.length + '网络',
+        compInfo: compInfo,
     };
 }
 
@@ -455,7 +572,11 @@ function storeResult(r: AnalysisResult): void {
         eda.sys_Storage.setExtensionUserConfig('__nl_data', JSON.stringify({
             nets: r.nets,
             comps: r.comps.size,
-            netCount: r.neta.length
+            netCount: r.neta.length,
+            // Per-component metadata (value/name/manufacturer/lcsc/...) so chat.html
+            // can show "what these components actually are" and feed it to the AI.
+            // Added in v1.4.0; old readers ignore unknown fields.
+            compInfo: r.compInfo || {},
         }));
     } catch (_) {}
 }

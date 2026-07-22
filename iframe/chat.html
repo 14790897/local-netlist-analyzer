@@ -291,6 +291,27 @@ function init() {
         // Build system context
         var ctx = cfg.systemPrompt + '\n\n--- 网表数据 ---\n';
         ctx += '元件数: ' + (nlData.comps || '?') + ', 网络数: ' + (nlData.netCount || netKeys.length) + '\n\n';
+        // v1.4.0: append per-component metadata (value/DeviceName/manufacturer/LCSC) so the
+        // AI can answer "what is R5?" without guessing. We only render the section when
+        // compInfo is present (v1.3.x data won't have it, that's fine).
+        if (nlData.compInfo && Object.keys(nlData.compInfo).length > 0) {
+            ctx += '--- 器件型号清单 ---\n';
+            var ciKeys = Object.keys(nlData.compInfo).sort();
+            for (var ci = 0; ci < ciKeys.length; ci++) {
+                var d = ciKeys[ci];
+                var info = nlData.compInfo[d] || {};
+                var parts2 = [];
+                if (info.name) parts2.push(info.name);
+                if (info.value) parts2.push(info.value);
+                if (info.manufacturer) parts2.push('(' + info.manufacturer + ')');
+                if (info.lcsc) parts2.push('[LCSC: ' + info.lcsc + ']');
+                if (info.footprint && info.footprint !== info.name) parts2.push(info.footprint);
+                var line = d + ': ' + (parts2.length ? parts2.join(' ') : '(无附加信息)');
+                if (info.lcscDesc) line += ' — ' + info.lcscDesc;
+                ctx += line + '\n';
+            }
+            ctx += '\n';
+        }
         for (var i = 0; i < netKeys.length; i++) {
             var net = netKeys[i];
             var entries = nlData.nets[net];
