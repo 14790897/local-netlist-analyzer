@@ -1,6 +1,8 @@
 # 局部网表分析器 — Local Netlist Analyzer
 
 嘉立创 EDA 专业版扩展插件。框选原理图区域，自动提取选中元件关联的局部网表，用于 AI 电路分析或人工快速查看连接关系。
+<img width="2923" height="1757" alt="image" src="https://github.com/user-attachments/assets/6a08d58f-da0d-44ef-b6a9-024aec2c9d2a" />
+
 
 ## 为什么需要这个插件
 
