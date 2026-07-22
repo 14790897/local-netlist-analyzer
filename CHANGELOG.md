@@ -1,3 +1,42 @@
+# 1.5.0
+
+## 新增 (整图分析 + AI 一键分析)
+
+之前 `analyzeSelection` 只能分析框选区域。v1.5.0 新增"整图分析"入口,直接读当前 sch 页的全集网表,不依赖 selection。
+
+1. **`analyzeWholeSchematic()` (顶菜单)**: 不读 `sch_SelectControl`,直接 `getNetlistFile('netlist', 'JLCEDA')` → 拿全 sch 元件 → 出 dialog:
+   ```
+   整图分析: 57元件 95网络  ·  3V3(34pin) · GND(28pin) · EN(1pin) · GPIO9(2pin) · VBUS(2pin) · NET_PB8(1pin)
+   U1: ESP32-C3-WROOM-02-N4 · 2.4GHz  ·  R1: 0603WAF1002T5E · 10kΩ  ·  C1: 100nF  ·  L1: 10uH  ·  Q1: AO3401A
+   ```
+   第一行用 "整图分析" 前缀,跟 `analyzeSelection` 的 "37选中 16元件" 明显区分。
+
+2. **`aiAnalyzeWholeSchematic()` (顶菜单)**: 同上,但走 AI 路径,自动开 chat.html + 设 `__ai_prefill` 提示词,模板说"基于整张原理图"而不是"基于框选":
+   ```
+   请基于以下整张原理图(共 57 个元件、95 个网络), 用中文给出结构化分析。覆盖以下要点:
+   1) 这张电路的主要功能(1-2 句话)和它大致在做什么产品/模块
+   2) 涉及的电源轨(VCC/GND/特殊电压)
+   3) 关键信号路径(输入→处理→输出), 识别主控/通信接口/传感器
+   4) 整体元件分工: U/R/C/Q/L/LED/M 各起什么作用、是否齐全
+   5) 任何值得注意的设计要点或潜在问题(缺件/未连接的 net/异常 value 等)
+   ```
+   compInfo 同样拼进 prompt(沿用 v1.4.0),AI 知道每个 desig 是什么型号。
+
+3. **菜单** (3 处):
+   - 顶菜单 `headerMenus.home` 加 2 项: "AI 分析整张原理图" / "分析整张原理图"
+   - 顶菜单 `headerMenus.sch` 加 2 项 (同上)
+   - 右键菜单 `contextMenus.sch` 加 1 项: "分析整张原理图"
+
+4. **复用**:
+   - `getNetlistText()` / `extractCompInfo()` / `compInfoShortLine()` / `buildCompInfoPrompt()` / `storeResult()` / `loadAIConfig()` / `loadFileConfig()` 全部复用
+   - `iframe/chat.html` 0 改动 — `__nl_data.compInfo` 跟选中路径走同一条读取链路,手动提问也带 compInfo
+   - `__file_config.saveToDisk` 沿用 v1.3.9 默认 false 语义, opt-in 才写 CSV/JSON
+
+5. **不做** (明确):
+   - ❌ 跨多 sch 页合并 — 只当前 sch 页
+   - ❌ 大原理图性能阈值 — 直接全量
+   - ❌ 新增 IFrame — 复用 chat.html
+
 # 1.4.0
 
 ## 新增 (分析结果带器件型号, dialog/AI 都知道每个 desig 是什么)

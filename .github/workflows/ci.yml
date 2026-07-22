@@ -21,6 +21,7 @@ jobs:
       - run: npm run build
       - run: node test/mock-test.js
       - run: node test/integration-test.js
+      - run: node test/whole-schematic-test.js
       - name: Browser E2E test
         run: |
           # playwright-core ships without browsers; install chromium via @playwright/test runner

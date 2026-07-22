@@ -258,6 +258,173 @@ export async function aiAnalyzeSelection(): Promise<void> {
     }
 }
 
+// ====== v1.5.0: Whole-schematic analysis ======
+// Same machinery as analyzeSelection / aiAnalyzeSelection but:
+//   - skips sch_SelectControl entirely (no selection required)
+//   - dumps every refdes in the current schematic page
+//   - dialog/AI prompt explicitly mark "整图" so the user can't confuse
+//     it with the selection-based variant
+
+/** Parse the v2.0.0 netlist and return the same AnalysisResult shape used by
+ *  doAnalyze, but for the whole schematic. No selection filtering — every
+ *  real refdes in the netlist is included. */
+async function doAnalyzeAll(): Promise<AnalysisResult> {
+    var empty: AnalysisResult = { ok: false, ids: [], nets: {}, comps: new Set(), neta: [], nl: '', csv: '', summary: '', compInfo: {} };
+
+    var nets: Record<string, string[]> = {};
+    var comps = new Set<string>();
+    var compInfo: Record<string, ComponentInfo> = {};
+    var nl = await getNetlistText();
+
+    if (!nl) {
+        empty.error = '未能获取整图网表。请在原理图页面打开(不能是空 sch)';
+        return empty;
+    }
+
+    try {
+        var obj = JSON.parse(nl);
+        var components = obj.components || obj;
+        if (!components || typeof components !== 'object') {
+            empty.error = '网表 JSON 缺少 components 字段(可能 EDA V3 格式不同)';
+            return empty;
+        }
+        var ckeys = Object.keys(components);
+        for (var k = 0; k < ckeys.length; k++) {
+            var c = components[ckeys[k]];
+            if (!c || typeof c !== 'object') continue;
+            var desig = (c.props && c.props.Designator) || '';
+            if (!desig || desig.length > 10 || !/^[A-Za-z][A-Za-z0-9_]*\d+$/.test(desig)) continue;
+
+            comps.add(desig);
+            var info = extractCompInfo(c.props);
+            if (Object.keys(info).length > 0) compInfo[desig] = info;
+
+            var pim = c.pinInfoMap || c.pins || c.pinMap || {};
+            var pnKeys = Object.keys(pim);
+            for (var j = 0; j < pnKeys.length; j++) {
+                var pin = pim[pnKeys[j]];
+                if (!pin || typeof pin !== 'object') continue;
+                var pnet = pin.net || '';
+                var pnum = pin.number || pnKeys[j];
+                if (pnet && pnum) {
+                    if (!nets[pnet]) nets[pnet] = [];
+                    nets[pnet].push(desig + '-' + pnum);
+                }
+            }
+        }
+    } catch (e) {
+        empty.error = '解析网表出错: ' + (e && (e as any).message || String(e));
+        return empty;
+    }
+
+    if (comps.size === 0) {
+        empty.error = '整图网表为空(可能 sch 还没画元件)';
+        return empty;
+    }
+
+    var neta = Object.keys(nets).sort();
+    var csv = 'Net,Designator,Pin\n';
+    for (var ni = 0; ni < neta.length; ni++) {
+        var ents = nets[neta[ni]];
+        for (var ei = 0; ei < ents.length; ei++) csv += neta[ni] + ',' + ents[ei] + '\n';
+    }
+
+    return {
+        ok: true,
+        ids: [],
+        nets: nets,
+        comps: comps,
+        neta: neta,
+        nl: nl,
+        csv: csv,
+        summary: comps.size + '元件 ' + neta.length + '网络',
+        compInfo: compInfo,
+    };
+}
+
+/** Whole-schematic dialog variant. Always talks in terms of "整图" so the user
+ *  can tell it apart from analyzeSelection. */
+export async function analyzeWholeSchematic(): Promise<void> {
+    try {
+        var r = await doAnalyzeAll();
+        if (!r.ok) { showDialog(r.error || '整图分析失败'); return; }
+
+        if (loadFileConfig().saveToDisk) {
+            try { await eda.sys_FileSystem.saveFile(new Blob([r.csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
+            if (r.nl) { try { await eda.sys_FileSystem.saveFile(new Blob([r.nl], { type: 'application/json' }), 'netlist-raw.json'); } catch (_2) {} }
+        }
+
+        storeResult(r);
+
+        // Dialog: 1st line = totals, 2nd line = top-6 components
+        var detail: string[] = [];
+        for (var dn = 0; dn < Math.min(6, r.neta.length); dn++) {
+            detail.push(r.neta[dn] + '(' + r.nets[r.neta[dn]].length + 'pin)');
+        }
+        var dialogMsg = '整图分析: ' + r.summary;
+        if (detail.length > 0) dialogMsg += '  ·  ' + detail.join(' · ');
+        var compKeys = Object.keys(r.compInfo || {});
+        if (compKeys.length > 0) {
+            var compDetail: string[] = [];
+            for (var ck = 0; ck < Math.min(6, compKeys.length); ck++) {
+                compDetail.push(compInfoShortLine(compKeys[ck], r.compInfo[compKeys[ck]]));
+            }
+            dialogMsg += '\n' + compDetail.join('  ·  ');
+        }
+        showDialog(dialogMsg);
+    } catch (e) {
+        showDialog('整图分析出错: ' + (e && (e as any).message || String(e)));
+    }
+}
+
+/** Whole-schematic AI variant. Identical AI plumbing to aiAnalyzeSelection but
+ *  reads the whole schematic, so the prompt says "整张原理图" instead of
+ *  "已框选 N 个元件". */
+export async function aiAnalyzeWholeSchematic(): Promise<void> {
+    try {
+        var r = await doAnalyzeAll();
+        if (!r.ok) { showDialog(r.error || '整图分析失败'); return; }
+
+        if (loadFileConfig().saveToDisk) {
+            try { await eda.sys_FileSystem.saveFile(new Blob([r.csv], { type: 'text/csv' }), 'local-netlist.csv'); } catch (_) {}
+            if (r.nl) { try { await eda.sys_FileSystem.saveFile(new Blob([r.nl], { type: 'application/json' }), 'netlist-raw.json'); } catch (_2) {} }
+        }
+
+        storeResult(r);
+
+        var cfg = loadAIConfig();
+        if (!cfg.key) {
+            showDialog('请先配置 AI API Key（将在设置面板中打开）');
+            try { eda.sys_IFrame.openIFrame('/iframe/settings.html', 520, 480, 'ai-settings', { title: 'AI 设置 — 请先配置 API Key' }); } catch (_) {}
+            return;
+        }
+
+        var nets = Object.keys(r.nets);
+        var compListBlock = buildCompInfoPrompt(r.compInfo);
+        var preset =
+            '请基于以下整张原理图（共 ' + r.comps.size + ' 个元件、' + r.neta.length + ' 个网络），' +
+            '用中文给出结构化分析。覆盖以下要点：\n' +
+            '1) 这张电路的主要功能（1-2 句话）和它大致在做什么产品/模块\n' +
+            '2) 涉及的电源轨（VCC/GND/特殊电压）\n' +
+            '3) 关键信号路径（输入→处理→输出），识别主控/通信接口/传感器\n' +
+            '4) 整体元件分工：U/R/C/Q/L/LED/M 各起什么作用、是否齐全\n' +
+            '5) 任何值得注意的设计要点或潜在问题（缺件/未连接的 net/异常 value 等）';
+        if (compListBlock) preset += '\n\n--- 器件型号清单（来自网表 props）---\n' + compListBlock;
+        try { eda.sys_Storage.setExtensionUserConfig('__ai_prefill', preset); } catch (_) {}
+
+        try {
+            eda.sys_IFrame.openIFrame('/iframe/chat.html', 700, 560, 'ai-chat', {
+                title: 'AI 整图分析: ' + r.comps.size + '元件 ' + r.neta.length + '网络',
+                maximizeButton: true,
+            });
+        } catch (_) {
+            showDialog(r.summary + ' — IFrame 打开失败，请手动点击 AI 对话');
+        }
+    } catch (e) {
+        showDialog('整图分析出错: ' + (e && (e as any).message || String(e)));
+    }
+}
+
 // ====== Internal ======
 
 interface AnalysisResult {
