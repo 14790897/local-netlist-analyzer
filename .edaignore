@@ -5,9 +5,11 @@
 /build/
 /config/
 /coverage/
+/docs/
 /node_modules/
 /src/
 /test/
+/docs/screenshots/
 /.editorconfig
 /.gitattributes
 /.gitignore
