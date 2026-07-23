@@ -1,3 +1,12 @@
+# 1.5.1
+
+## 改动 (重新打包 + 包含演示截图)
+- `.edaignore` 移掉 `/docs/` 排除(只剩 `/docs/screenshots/` 不被排除)
+- eext 现在带 `docs/screenshots/*.png` 4 张 + `docs/api/*.md` 3 张 + `docs/API-REFERENCE.md` / `docs/TESTING.md` 文档
+- 目的: 重新发布 eext 时,下载后解压即可看到 README 引用的演示截图
+- eext 大小: 100 KB → 3.1 MB(主要是 4 张 PNG 占 3.2 MB)
+- 运行时无变化(代码层完全跟 v1.5.0 一致)
+
 # 1.5.0
 
 ## 新增 (整图分析 + AI 一键分析)
