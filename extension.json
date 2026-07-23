@@ -4,19 +4,20 @@
 	"displayName": "局部网表分析器",
 	"description": "AI 电路分析 + 局部网表导出。框选原理图区域, 导出选中元件关联的网表 (CSV/JSON), 并由 AI 分析电路功能、电源轨、信号路径与潜在风险, 自动识别器件型号与 LCSC 编号。",
 	"version": "1.5.1",
-	"publisher": "liuweiqing",
+	"publisher": "OSHWHub",
 	"engines": {
 		"eda": "^3.0.0"
 	},
 	"license": "Apache-2.0",
 	"repository": {
-		"type": "extension-store",
-		"url": ""
+		"type": "github",
+		"url": "https://github.com/14790897/local-netlist-analyzer"
 	},
 	"categories": "Other",
 	"keywords": ["netlist", "analysis", "ai", "网表"],
 	"images": {
-		"logo": "./images/logo.png"
+		"logo": "./images/logo.png",
+		"banner": "./images/banner.jpg"
 	},
 	"homepage": "",
 	"bugs": "",
