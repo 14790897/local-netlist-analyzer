@@ -1,3 +1,12 @@
+# 1.5.2
+
+## 修复 (banner 图片未入库 — 驳回问题)
+- **根因**: v1.5.1 的 commit `105d5b6` 虽然把 `banner.png` 转成 `banner.jpg` (1920×810 JPEG, 64:27) 并更新了 `extension.json`,但**漏掉了 `git add`**,导致 `images/banner.jpg` 一直是未追踪状态。GitHub 仓库的 git 树里从来没有这个文件,所以 CI 打的 .eext (1,363,168 B / 36 条目) 也没有 `images/banner.jpg`。
+- 审核员驳回信息: "extension.json 包含 banner 字段, 但在指定路径下未检测到对应的 banner 图片"。
+- **修复**: commit `dca1202` 把现有的 `images/banner.jpg` (70,911 B, JPEG 1920×810) 真正 `git add` 进仓库,这样 CI 重新 build 的 .eext 会包含 banner。
+- `extension.json` / `package.json` version bump `1.5.1 → 1.5.2`,重新打 tag 触发 release。
+- 运行时无任何变化,只是 eext 真正带上 banner.jpg,审核后端能读到。
+
 # 1.5.1
 
 ## 改动 (重新打包 + 包含演示截图)

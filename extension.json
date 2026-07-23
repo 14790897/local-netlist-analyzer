@@ -3,7 +3,7 @@
 	"uuid": "7bdb0024e09b43129fe600321240eb6d",
 	"displayName": "局部网表分析器",
 	"description": "AI 电路分析 + 局部网表导出。框选原理图区域, 导出选中元件关联的网表 (CSV/JSON), 并由 AI 分析电路功能、电源轨、信号路径与潜在风险, 自动识别器件型号与 LCSC 编号。",
-	"version": "1.5.1",
+	"version": "1.5.2",
 	"publisher": "OSHWHub",
 	"engines": {
 		"eda": "^3.0.0"
