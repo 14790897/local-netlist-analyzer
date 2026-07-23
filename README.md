@@ -21,19 +21,19 @@
 
 启动后,顶部菜单多出 **局部网表** 一栏:
 
-![启动页](./docs/screenshots/01-startup.png)
+![启动页](./images/7ba3d2b5454fbedf7c653b92b53bf7db576c0764ed42e088b6630b7b53e11c9c.png)
 
 点击后展开 6 个子项 — 局部网表分析、AI 一键、整图分析、AI 设置、AI 对话:
 
-![顶菜单子项](./docs/screenshots/02-topmenu-submenu.png)
+![顶菜单子项](./images/b86e0140aebabcb8fd73b76280d133c4618869e79efd4c52529560c6ff065f33.png)
 
 **整图分析**:一键出 AI 分析,自动列出 56 个元件的 LCSC 编号清单 + 让 deepseek-v4-pro 推理:
 
-![整图分析 AI 面板](./docs/screenshots/03-whole-schematic-dialog.png)
+![整图分析 AI 面板](./images/70e1791392dc5a670db75e61f3a62ecde9a3273d51d68c65486a22023e167122.png)
 
 **未框选时**点"分析选中区域"会提示先框选:
 
-![未框选提示](./docs/screenshots/04-no-selection-warning.png)
+![未框选提示](./images/85f3c2a0cd4c2217f9425b813d6ab430cac4fbc53da77855663768b491e434ee.png)
 
 ## 安装
 
